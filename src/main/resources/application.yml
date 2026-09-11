@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: zerosum
+
+  # 애플리케이션 DataSource: app_rw (원장 UPDATE·DELETE 권한 없음, docs/07-ai-integration.md 권한 경계)
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zerosum
+    username: app_rw
+    password: app_rw
+
+  # Flyway 전용 계정: migrator (스키마 소유자). 애플리케이션은 이 계정을 쓰지 않는다
+  flyway:
+    url: jdbc:postgresql://localhost:5432/zerosum
+    user: migrator
+    password: migrator
+    locations: filesystem:db/migration
+
+  # 마스터 데이터(warehouse/location/sku/lot) 읽기 전용 조회에만 사용한다 (쓰기 경로는 JdbcClient)
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false

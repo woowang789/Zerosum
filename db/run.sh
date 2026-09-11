@@ -15,7 +15,7 @@ echo "══ 2. 스키마·목 데이터 적재 ══════════�
 apply() { docker exec -i "$C" psql -v ON_ERROR_STOP=1 -U "$1" -d zerosum -q < "$D/$2"; echo "   ✔ $2"; }
 apply postgres 00-roles.sql
 apply migrator  migration/V1__init.sql
-apply migrator  02-grants-views.sql
+apply migrator  migration/V2__grants_and_views.sql
 apply app_admin 03-seed.sql
 apply migrator  04-harness.sql
 
