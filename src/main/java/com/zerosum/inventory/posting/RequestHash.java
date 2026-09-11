@@ -20,7 +20,10 @@ final class RequestHash {
                         .collect(Collectors.joining(";"))
                 + "|" + Objects.toString(request.reasonCode(), "")
                 + "|" + Objects.toString(request.sourceRef(), "")
-                + "|" + Objects.toString(request.reversesTxnId(), "");
+                + "|" + Objects.toString(request.reversesTxnId(), "")
+                // db/04-harness.sql tst_post의 해시도 p_consume_alloc을 포함한다 — 같은 키로 소진 대상만
+                // 바꿔 재시도하면 다른 요청 본문으로 보고 IDEM_CONFLICT_409로 거절해야 하기 때문이다.
+                + "|" + request.consumeAllocationIds().stream().map(String::valueOf).collect(Collectors.joining(","));
         return sha256Hex(canonical);
     }
 

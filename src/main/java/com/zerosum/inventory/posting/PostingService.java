@@ -1,5 +1,6 @@
 package com.zerosum.inventory.posting;
 
+import com.zerosum.inventory.repository.AllocationRepository;
 import com.zerosum.inventory.repository.IdempotencyRepository;
 import com.zerosum.inventory.repository.InventoryTxnRepository;
 import com.zerosum.inventory.repository.LedgerRepository;
@@ -7,6 +8,7 @@ import com.zerosum.inventory.repository.LocationLockRepository;
 import com.zerosum.inventory.repository.OutboxRepository;
 import com.zerosum.inventory.repository.StockBalanceRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 import org.springframework.stereotype.Service;
@@ -27,10 +29,12 @@ public class PostingService {
     private final InventoryTxnRepository txnRepo;
     private final LedgerRepository ledgerRepo;
     private final OutboxRepository outboxRepo;
+    private final AllocationRepository allocationRepo;
 
     PostingService(IdempotencyRepository idempotencyRepo, PostingLineResolver lineResolver,
             LocationLockRepository locationLockRepo, StockBalanceRepository balanceRepo,
-            InventoryTxnRepository txnRepo, LedgerRepository ledgerRepo, OutboxRepository outboxRepo) {
+            InventoryTxnRepository txnRepo, LedgerRepository ledgerRepo, OutboxRepository outboxRepo,
+            AllocationRepository allocationRepo) {
         this.idempotencyRepo = idempotencyRepo;
         this.lineResolver = lineResolver;
         this.locationLockRepo = locationLockRepo;
@@ -38,6 +42,7 @@ public class PostingService {
         this.txnRepo = txnRepo;
         this.ledgerRepo = ledgerRepo;
         this.outboxRepo = outboxRepo;
+        this.allocationRepo = allocationRepo;
     }
 
     @Transactional
@@ -54,7 +59,7 @@ public class PostingService {
         List<ResolvedLine> entries = request.lines().stream().map(lineResolver::resolve).toList();
         PostingCommand cmd = new PostingCommand(request.idemKey(), request.txnType(), request.actorType(),
                 request.actorId(), entries, request.sourceType(), request.sourceRef(), request.reasonCode(),
-                request.reversesTxnId(), request.occurredAt());
+                request.reversesTxnId(), request.occurredAt(), request.consumeAllocationIds());
         cmd.validate();
 
         // ③ 잠금: location FOR SHARE → stock_balance FOR UPDATE, 둘 다 id 오름차순
@@ -70,6 +75,9 @@ public class PostingService {
         }
 
         // ⑤ 적용. 가용 부족이면 예외 → 전체 롤백. DB CHECK는 최후 방어선
+        // SHIPMENT가 아니면 consumeAllocationIds가 비어 있어 consumedQtyByBalance는 빈 맵을 돌려준다
+        // (AllocationRepository#consumedQtyByBalance) — 1단계 거래 유형은 이 조회가 사실상 no-op이다.
+        Map<Long, Integer> consumedQtyByBalance = allocationRepo.consumedQtyByBalance(cmd.consumeAllocationIds());
         long txnId = txnRepo.insert(cmd);
         for (ResolvedLine entry : cmd.entries()) {
             Integer onHandAfter;
@@ -79,13 +87,36 @@ public class PostingService {
                 LockedBalance balance = balances.find(entry.key())
                         .orElseThrow(() -> new PostingException("NO_STOCK",
                                 "%s/%s/%s 잔액 행이 없다".formatted(entry.locationCode(), entry.skuCode(), entry.lotNo())));
-                // 상대 갱신 + 가용 검사를 DB에 맡긴다 (같은 키가 이 거래에 여러 줄 있어도 누적으로 맞다 — StockBalanceRepository 참고)
-                onHandAfter = balanceRepo.applyDelta(balance.id(), entry.qtyDelta());
+                // 소진량은 맵에서 꺼내며 지운다 — on_hand_qty의 delta는 줄마다 달라 DB 상대 갱신으로 누적해도 맞지만,
+                // consumedQty는 "이 잔액 행에서 이번에 소진할 총량"으로 줄과 무관하게 고정값이라 같은 잔액 키를
+                // 가리키는 줄이 여럿이면 getOrDefault로는 매 줄 반복 적용돼 allocated_qty가 이중으로 깎인다
+                // (검증에서 발견된 결함 — 1단계의 절대값 덮어쓰기 결함과 같은 형태가 allocated_qty 차원에서 재현된 것).
+                // remove()로 이 거래에서 이 잔액 행에 대해 정확히 한 번만(첫 줄에서) 적용하고, 같은 키의 나머지
+                // 줄은 0을 받게 한다 — StockBalanceRepository#applyDelta(BalanceId, int, int) 갱신된 논증 참고.
+                Integer consumedQty = consumedQtyByBalance.remove(balance.id().value());
+                onHandAfter = balanceRepo.applyDelta(balance.id(), entry.qtyDelta(), consumedQty != null ? consumedQty : 0);
             }
             ledgerRepo.insert(txnId, entry, onHandAfter);
         }
 
-        // ⑥ 아웃박스 + 멱등 결과 기록 (1단계는 할당이 범위 밖이라 소진 단계가 없다)
+        // 소진 대상 할당은 반드시 이 거래의 물리 줄이 가리키는 잔액에 붙어 있어야 한다 — 할당을 소진한다는
+        // 것은 그 재고가 이 거래로 나갔다는 뜻이고, 나갔다면 그 잔액에 원장 줄(applyDelta 호출)이 있어야 한다.
+        // 루프가 끝난 뒤에도 맵에 남은 항목이 있다면 그 잔액은 이 거래의 어느 줄도 가리키지 않았다는 뜻이다 —
+        // allocated_qty는 그대로인데 ⑥에서 해당 할당만 CONSUMED로 닫히면 I5(할당량 = ACTIVE 할당 합계)가
+        // 조용히 깨진다. DB CHECK로는 못 잡는 위반이라(어느 CHECK도 allocated_qty와 ACTIVE 할당 합계를 비교하지
+        // 않는다) 여기서 미리 걸러야 한다 (검증에서 발견: 호출자가 소진 대상 할당과 출고 줄의 잔액을 다르게 넘긴 버그).
+        // 참조 구현(db/04-harness.sql tst_post)은 잔액마다 v_used를 조회할 뿐 이 대응 관계를 검사하지 않아
+        // 같은 구멍이 있다 — 하네스는 184건으로 검증된 파일이라 고치지 않고, Java 쪽만 의도적으로 더 엄격하게 뒀다.
+        if (!consumedQtyByBalance.isEmpty()) {
+            throw new PostingException("ORPHAN_CONSUME",
+                    "소진 대상 할당이 가리키는 잔액 행 id %s가 이 거래의 물리 줄에 없다"
+                            .formatted(consumedQtyByBalance.keySet()));
+        }
+
+        // ⑥ 할당 소진 표시. WHERE status='ACTIVE'의 영향 행 수가 요청한 id 수와 다르면 롤백 (AllocationRepository#markConsumed)
+        allocationRepo.markConsumed(cmd.consumeAllocationIds(), txnId);
+
+        // ⑦ 아웃박스 + 멱등 결과 기록
         outboxRepo.appendStockPosted(txnId, cmd);
         idempotencyRepo.completePosted(request.idemKey(), txnId);
         return new Posted(txnId);

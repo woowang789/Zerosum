@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * 코드 해석과 검증을 마친 포스팅 커맨드. docs/04-write-path.md 포스팅 흐름의 {@code cmd}에 대응한다.
- * 1단계 범위(RECEIPT/MOVE/ADJUSTMENT/REVERSAL)에는 할당 소진이 없으므로, 출고 전용 규칙은 없다.
+ * {@code consumeAllocationIds}는 출고(SHIPMENT)가 함께 소진할 할당 id다 (2단계 확장) — 그 외 거래 유형은 빈 리스트다.
  */
 public record PostingCommand(
         String idemKey,
@@ -20,7 +20,8 @@ public record PostingCommand(
         String sourceRef,
         String reasonCode,
         Long reversesTxnId,
-        Instant occurredAt) {
+        Instant occurredAt,
+        List<Long> consumeAllocationIds) {
 
     /** ② 커맨드 검증: (SKU, 로트)별 합계 0, 조정 사유 코드 필수. */
     public void validate() {
