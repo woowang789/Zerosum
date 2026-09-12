@@ -8,6 +8,7 @@ import com.zerosum.inventory.posting.PostingGateway;
 import com.zerosum.inventory.posting.PostingLineInput;
 import com.zerosum.inventory.posting.PostingRequest;
 import com.zerosum.inventory.posting.Preconditions;
+import com.zerosum.inventory.repository.ReconciliationRepository;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -63,6 +64,11 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.flyway.password", () -> "migrator");
         // 동시성 테스트가 10개 안팎의 커넥션을 동시에 물고 대기하므로 기본 풀(10)보다 여유를 둔다
         registry.add("spring.datasource.hikari.maximum-pool-size", () -> "20");
+        // 스케줄러가 공유 컨텍스트에서 배경으로 돌면 테스트가 기대하는 published_at·inventory_issue
+        // 상태와 우연히 경합할 수 있다 (3단계 작업 지시: "테스트에서는 스케줄러를 끌 수 있게 해라").
+        // 관련 테스트는 OutboxRelayService#relayOnce()·ReconciliationService#runOnce()를 직접 호출한다.
+        registry.add("zerosum.outbox.relay.enabled", () -> "false");
+        registry.add("zerosum.reconciliation.enabled", () -> "false");
     }
 
     @Autowired
@@ -70,6 +76,9 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected PostingGateway postingGateway;
+
+    @Autowired
+    protected ReconciliationRepository reconciliationRepository;
 
     // 매 테스트 전에 스키마 14개 테이블을 전부 비우고(TRUNCATE는 FK 제약이 있으면 참조하는 테이블까지
     // 같은 문장에 있어야 하므로 마스터까지 포함한다) db/03-seed.sql로 마스터 데이터를 다시 채운다.
@@ -207,48 +216,17 @@ public abstract class AbstractIntegrationTest {
                 .single();
     }
 
-    // ── 정합 검증 배치 (docs/06-events-reconciliation.md ①~⑤, db/04-harness.sql tst_recon과 동일) ──────
-
-    private record ReconciliationCheck(String label, int count) {
-    }
+    // ── 정합 검증 배치 (docs/06-events-reconciliation.md ①~⑤) ────────────────────────
 
     /**
      * ①~⑤ 다섯 쿼리를 모두 실행해 전부 0건인지 단언한다. 실사는 잔액·원장·할당·로케이션 표시를 한꺼번에
      * 건드려 불변식이 깨질 지점이 가장 많으므로, 이번에 만드는 실사 테스트는 모두 끝에서 이 메서드를 호출한다.
+     *
+     * <p>쿼리 정본은 {@link ReconciliationRepository}에 있다 — 운영 배치(ReconciliationService)도
+     * 같은 리포지토리를 호출하므로 테스트 오라클과 배치가 같은 쿼리를 쓴다 (3단계 작업 지시 1번).
      */
     protected void assertReconciliationClean() {
-        List<ReconciliationCheck> checks = jdbcClient.sql("""
-                SELECT '① 잔액 투영 (I4)' AS label, count(*) AS cnt FROM (
-                  WITH ledger_sum AS (
-                    SELECT e.location_id, e.sku_id, e.lot_id, SUM(e.qty_delta) AS ledger_qty
-                    FROM inventory_ledger_entry e JOIN location l ON l.id = e.location_id
-                    WHERE NOT l.is_virtual GROUP BY e.location_id, e.sku_id, e.lot_id)
-                  SELECT b.location_id FROM stock_balance b
-                  FULL JOIN ledger_sum s USING (location_id, sku_id, lot_id)
-                  WHERE COALESCE(b.on_hand_qty, 0) <> COALESCE(s.ledger_qty, 0)) x
-                UNION ALL
-                SELECT '② 할당 (I5)', count(*) FROM (
-                  SELECT b.id FROM stock_balance b
-                  LEFT JOIN allocation a ON a.balance_id = b.id AND a.status = 'ACTIVE'
-                  GROUP BY b.id, b.allocated_qty HAVING b.allocated_qty <> COALESCE(SUM(a.qty), 0)) x
-                UNION ALL
-                SELECT '③ 원장 체인 (I7)', count(*) FROM (
-                  SELECT id FROM (
-                    SELECT e.*, COALESCE(LAG(e.on_hand_after) OVER w, 0) + e.qty_delta AS expected
-                    FROM inventory_ledger_entry e WHERE e.on_hand_after IS NOT NULL
-                    WINDOW w AS (PARTITION BY e.location_id, e.sku_id, e.lot_id ORDER BY e.id)) t
-                  WHERE on_hand_after <> expected) x
-                UNION ALL
-                SELECT '④ 가상 로케이션 잔액 행', count(*) FROM (
-                  SELECT b.id FROM stock_balance b JOIN location l ON l.id = b.location_id WHERE l.is_virtual) x
-                UNION ALL
-                SELECT '⑤ 실사 표시 (I10)', count(*) FROM (
-                  SELECT l.id FROM location l
-                  LEFT JOIN count_session s ON s.location_id = l.id AND s.status IN ('OPEN','REVIEW')
-                  WHERE l.count_session_id IS DISTINCT FROM s.id) x
-                """)
-                .query((rs, rowNum) -> new ReconciliationCheck(rs.getString("label"), rs.getInt("cnt")))
-                .list();
+        List<ReconciliationRepository.CheckSummary> checks = reconciliationRepository.summarize();
 
         assertThat(checks)
                 .as("정합 검증 배치 ①~⑤(docs/06-events-reconciliation.md)는 모두 0건이어야 한다: %s", checks)

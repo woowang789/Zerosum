@@ -266,7 +266,7 @@ public class CountSessionService {
         };
 
         countSessionRepo.confirm(sessionId, txnId, user);
-        countResultRepo.resolveVarianceIssues(sessionId, txnId);
+        countResultRepo.resolveVarianceIssues(sessionId, txnId, user);
         return txnId;
     }
 

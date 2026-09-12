@@ -57,9 +57,11 @@ public class CountResultRepository {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void insertVarianceIssues(long sessionId) {
+        // count_session_id 컬럼(V3__issue_columns_and_indexes.sql)도 함께 채운다 — detail의 JSONB는
+        // db/04-harness.sql이 그대로 읽으므로 내용을 그대로 두고, 다시 찾을 때 쓸 외래키만 더한다.
         jdbc.sql("""
-                INSERT INTO inventory_issue (issue_type, severity, location_id, sku_id, lot_id, detail)
-                SELECT 'COUNT_VARIANCE', 'MEDIUM', cr.location_id, cr.sku_id, cr.lot_id,
+                INSERT INTO inventory_issue (issue_type, severity, location_id, sku_id, lot_id, count_session_id, detail)
+                SELECT 'COUNT_VARIANCE', 'MEDIUM', cr.location_id, cr.sku_id, cr.lot_id, cr.count_session_id,
                        jsonb_build_object('countSessionId', cr.count_session_id, 'systemQty', cr.system_qty,
                                           'countedQty', cr.counted_qty, 'diff', cr.counted_qty - cr.system_qty)
                 FROM count_result cr WHERE cr.count_session_id = :sessionId AND cr.counted_qty <> cr.system_qty
@@ -86,13 +88,16 @@ public class CountResultRepository {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    public void resolveVarianceIssues(long sessionId, long resolutionTxnId) {
+    public void resolveVarianceIssues(long sessionId, long resolutionTxnId, String resolvedBy) {
+        // count_session_id 컬럼으로 직접 찾는다 — 예전에는 detail->>'countSessionId' JSONB 문자열
+        // 비교로 다시 찾아야 했다 (V3__issue_columns_and_indexes.sql로 이 컬럼과 외래키가 생겼다).
         jdbc.sql("""
-                UPDATE inventory_issue SET status = 'RESOLVED', resolved_txn_id = :txnId
-                WHERE issue_type = 'COUNT_VARIANCE' AND (detail ->> 'countSessionId')::BIGINT = :sessionId
-                  AND status = 'OPEN'
+                UPDATE inventory_issue
+                SET status = 'RESOLVED', resolved_txn_id = :txnId, resolved_by = :resolvedBy, resolved_at = now()
+                WHERE issue_type = 'COUNT_VARIANCE' AND count_session_id = :sessionId AND status = 'OPEN'
                 """)
                 .param("txnId", resolutionTxnId)
+                .param("resolvedBy", resolvedBy)
                 .param("sessionId", sessionId)
                 .update();
     }

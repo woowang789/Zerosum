@@ -1,6 +1,7 @@
 package com.zerosum.inventory.repository;
 
 import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.OutboxEvent;
 import com.zerosum.inventory.domain.PostingCommand;
 import com.zerosum.inventory.domain.ResolvedLine;
 import com.zerosum.inventory.domain.SkuId;
@@ -109,6 +110,37 @@ public class OutboxRepository {
                         jsonb_build_object('orderLineRef', :orderLineRef, 'qty', :qty, 'allocationIds', %s))
                 """.formatted(idsExpr))
                 .params(params)
+                .update();
+    }
+
+    // ── 릴레이 (OutboxRelayService가 부른다) ─────────────────────────────────────────
+    //
+    // 위 append* 메서드와 달리 Propagation.MANDATORY를 쓰지 않는다 — 저 메서드들은 포스팅 트랜잭션
+    // 안에서만 불려야 하지만(같은 커밋으로 묶여야 하는 이벤트 기록), 릴레이는 그 자체가 독립된 배치
+    // 진입점이라 상위 트랜잭션이 없다. select와 update 각각 한 문장으로 끝나 트랜잭션 없이도 원자적이다.
+
+    /** {@code published_at IS NULL}을 커서로 쓴다 — id 오름차순 커서는 커밋 순서가 id 순서와 다를 수 있어 피한다. */
+    public List<OutboxEvent> selectUnpublished(int limit) {
+        return jdbc.sql("""
+                SELECT id, event_type, partition_key, payload
+                FROM outbox_event
+                WHERE published_at IS NULL
+                ORDER BY id
+                LIMIT :limit
+                """)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new OutboxEvent(rs.getLong("id"), rs.getString("event_type"),
+                        rs.getString("partition_key"), rs.getString("payload")))
+                .list();
+    }
+
+    /** 소비자 호출까지 성공한(=브로커 확인을 받은) id만 갱신한다. */
+    public void markPublished(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        jdbc.sql("UPDATE outbox_event SET published_at = now() WHERE id IN (:ids)")
+                .param("ids", ids)
                 .update();
     }
 }
