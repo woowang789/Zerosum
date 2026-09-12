@@ -1,8 +1,8 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.LocationId;
-import com.zerosum.inventory.posting.LockedLocation;
-import com.zerosum.inventory.posting.LockedLocations;
+import com.zerosum.inventory.domain.LocationId;
+import com.zerosum.inventory.domain.LockedLocation;
+import com.zerosum.inventory.domain.LockedLocations;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;

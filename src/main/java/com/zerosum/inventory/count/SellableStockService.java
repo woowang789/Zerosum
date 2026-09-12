@@ -1,5 +1,6 @@
 package com.zerosum.inventory.count;
 
+import com.zerosum.inventory.domain.SellableStock;
 import com.zerosum.inventory.master.Sku;
 import com.zerosum.inventory.master.SkuRepository;
 import com.zerosum.inventory.master.Warehouse;

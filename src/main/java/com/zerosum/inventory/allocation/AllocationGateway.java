@@ -1,5 +1,6 @@
 package com.zerosum.inventory.allocation;
 
+import com.zerosum.inventory.domain.AllocationId;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.core.retry.RetryPolicy;

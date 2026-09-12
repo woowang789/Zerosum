@@ -2,6 +2,7 @@ package com.zerosum.inventory.allocation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zerosum.inventory.domain.AllocationException;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.util.ArrayList;
 import java.util.List;

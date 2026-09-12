@@ -1,4 +1,4 @@
-package com.zerosum.inventory.posting;
+package com.zerosum.inventory.domain;
 
 /**
  * 코드가 id로 해석된 커맨드 한 줄. {@code virtual}이 참이면 가상 로케이션이라 잔액 행이 없다.

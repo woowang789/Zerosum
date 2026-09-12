@@ -1,10 +1,10 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.BalanceSnapshot;
-import com.zerosum.inventory.posting.IdempotencyConflictException;
-import com.zerosum.inventory.posting.Posted;
-import com.zerosum.inventory.posting.PostingOutcome;
-import com.zerosum.inventory.posting.PreconditionFailed;
+import com.zerosum.inventory.domain.BalanceSnapshot;
+import com.zerosum.inventory.domain.IdempotencyConflictException;
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingOutcome;
+import com.zerosum.inventory.domain.PreconditionFailed;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;

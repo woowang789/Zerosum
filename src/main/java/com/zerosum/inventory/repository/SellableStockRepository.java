@@ -1,6 +1,6 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.count.SellableStock;
+import com.zerosum.inventory.domain.SellableStock;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 

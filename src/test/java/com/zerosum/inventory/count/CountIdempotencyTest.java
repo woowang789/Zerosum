@@ -3,7 +3,7 @@ package com.zerosum.inventory.count;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.zerosum.inventory.posting.IdempotencyConflictException;
+import com.zerosum.inventory.domain.IdempotencyConflictException;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.util.List;
 import org.junit.jupiter.api.Test;

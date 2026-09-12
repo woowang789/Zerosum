@@ -1,18 +1,18 @@
 package com.zerosum.inventory.count;
 
+import com.zerosum.inventory.domain.IdempotencyConflictException;
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingOutcome;
+import com.zerosum.inventory.domain.PreconditionFailed;
 import com.zerosum.inventory.master.Location;
 import com.zerosum.inventory.master.LocationRepository;
 import com.zerosum.inventory.master.Lot;
 import com.zerosum.inventory.master.LotRepository;
 import com.zerosum.inventory.master.Sku;
 import com.zerosum.inventory.master.SkuRepository;
-import com.zerosum.inventory.posting.IdempotencyConflictException;
-import com.zerosum.inventory.posting.Posted;
 import com.zerosum.inventory.posting.PostingLineInput;
-import com.zerosum.inventory.posting.PostingOutcome;
 import com.zerosum.inventory.posting.PostingRequest;
 import com.zerosum.inventory.posting.PostingService;
-import com.zerosum.inventory.posting.PreconditionFailed;
 import com.zerosum.inventory.posting.Preconditions;
 import com.zerosum.inventory.repository.CountResultRepository;
 import com.zerosum.inventory.repository.CountSessionRepository;

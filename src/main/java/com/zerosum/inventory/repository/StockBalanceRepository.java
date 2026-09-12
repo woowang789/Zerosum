@@ -1,15 +1,15 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.BalanceId;
-import com.zerosum.inventory.posting.BalanceKey;
-import com.zerosum.inventory.posting.LocationId;
-import com.zerosum.inventory.posting.LockedBalance;
-import com.zerosum.inventory.posting.LockedBalances;
-import com.zerosum.inventory.posting.LotId;
-import com.zerosum.inventory.posting.PostingException;
-import com.zerosum.inventory.posting.ResolvedLine;
-import com.zerosum.inventory.posting.SkuId;
-import com.zerosum.inventory.posting.WarehouseId;
+import com.zerosum.inventory.domain.BalanceId;
+import com.zerosum.inventory.domain.BalanceKey;
+import com.zerosum.inventory.domain.LocationId;
+import com.zerosum.inventory.domain.LockedBalance;
+import com.zerosum.inventory.domain.LockedBalances;
+import com.zerosum.inventory.domain.LotId;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.ResolvedLine;
+import com.zerosum.inventory.domain.SkuId;
+import com.zerosum.inventory.domain.WarehouseId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

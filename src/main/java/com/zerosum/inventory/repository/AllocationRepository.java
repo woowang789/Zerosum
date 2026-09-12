@@ -1,12 +1,12 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.allocation.AllocationCandidate;
-import com.zerosum.inventory.allocation.AllocationException;
-import com.zerosum.inventory.allocation.AllocationId;
-import com.zerosum.inventory.posting.BalanceId;
-import com.zerosum.inventory.posting.PostingException;
-import com.zerosum.inventory.posting.SkuId;
-import com.zerosum.inventory.posting.WarehouseId;
+import com.zerosum.inventory.domain.AllocationCandidate;
+import com.zerosum.inventory.domain.AllocationException;
+import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.BalanceId;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.SkuId;
+import com.zerosum.inventory.domain.WarehouseId;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;

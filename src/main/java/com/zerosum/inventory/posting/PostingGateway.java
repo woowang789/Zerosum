@@ -1,5 +1,7 @@
 package com.zerosum.inventory.posting;
 
+import com.zerosum.inventory.domain.LockedBalances;
+import com.zerosum.inventory.domain.PostingOutcome;
 import java.time.Duration;
 import java.util.function.Predicate;
 import org.springframework.core.retry.RetryPolicy;

@@ -1,6 +1,5 @@
-package com.zerosum.inventory.allocation;
+package com.zerosum.inventory.domain;
 
-import com.zerosum.inventory.posting.BalanceId;
 import java.time.LocalDate;
 
 /**

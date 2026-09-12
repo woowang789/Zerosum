@@ -1,6 +1,6 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.ResolvedLine;
+import com.zerosum.inventory.domain.ResolvedLine;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;

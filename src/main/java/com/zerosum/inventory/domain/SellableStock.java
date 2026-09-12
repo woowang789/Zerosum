@@ -1,4 +1,4 @@
-package com.zerosum.inventory.count;
+package com.zerosum.inventory.domain;
 
 /**
  * v_sellable_stock 한 행. docs/05-count-session.md 판매 가능 수량 — 실사 중인 로케이션의 (실재고 − 할당량)은

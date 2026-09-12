@@ -1,4 +1,4 @@
-package com.zerosum.inventory.allocation;
+package com.zerosum.inventory.domain;
 
 /**
  * 할당·할당 해제 단계에서 발생하는 비즈니스 오류. {@code code}는 db/04-harness.sql의 tst_allocate·

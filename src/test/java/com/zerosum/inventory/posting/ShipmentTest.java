@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.zerosum.inventory.allocation.AllocateRequest;
 import com.zerosum.inventory.allocation.AllocationGateway;
-import com.zerosum.inventory.allocation.AllocationId;
 import com.zerosum.inventory.allocation.AllocationResult;
+import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.PostingOutcome;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.time.Instant;
 import java.util.ArrayList;

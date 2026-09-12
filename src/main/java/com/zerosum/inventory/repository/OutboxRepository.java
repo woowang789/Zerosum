@@ -1,9 +1,9 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.allocation.AllocationId;
-import com.zerosum.inventory.posting.PostingCommand;
-import com.zerosum.inventory.posting.ResolvedLine;
-import com.zerosum.inventory.posting.SkuId;
+import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.PostingCommand;
+import com.zerosum.inventory.domain.ResolvedLine;
+import com.zerosum.inventory.domain.SkuId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;

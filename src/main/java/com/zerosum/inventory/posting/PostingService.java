@@ -1,5 +1,14 @@
 package com.zerosum.inventory.posting;
 
+import com.zerosum.inventory.domain.LockedBalance;
+import com.zerosum.inventory.domain.LockedBalances;
+import com.zerosum.inventory.domain.LockedLocations;
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingCommand;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.PostingOutcome;
+import com.zerosum.inventory.domain.PreconditionFailed;
+import com.zerosum.inventory.domain.ResolvedLine;
 import com.zerosum.inventory.repository.AllocationRepository;
 import com.zerosum.inventory.repository.IdempotencyRepository;
 import com.zerosum.inventory.repository.InventoryTxnRepository;

@@ -3,8 +3,9 @@ package com.zerosum.inventory.allocation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.zerosum.inventory.posting.IdempotencyConflictException;
-import com.zerosum.inventory.posting.PostingException;
+import com.zerosum.inventory.domain.AllocationException;
+import com.zerosum.inventory.domain.IdempotencyConflictException;
+import com.zerosum.inventory.domain.PostingException;
 import com.zerosum.inventory.posting.Preconditions;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;

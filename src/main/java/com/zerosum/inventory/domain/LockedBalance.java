@@ -1,4 +1,4 @@
-package com.zerosum.inventory.posting;
+package com.zerosum.inventory.domain;
 
 /**
  * FOR UPDATE로 잠근 직후의 잔액 스냅샷. 선행 조건 검사({@link PreconditionFailed}의 근거)와

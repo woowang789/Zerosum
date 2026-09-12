@@ -1,4 +1,4 @@
-package com.zerosum.inventory.posting;
+package com.zerosum.inventory.domain;
 
 import java.util.List;
 

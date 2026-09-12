@@ -7,6 +7,7 @@ import com.zerosum.inventory.allocation.AllocateRequest;
 import com.zerosum.inventory.allocation.AllocationGateway;
 import com.zerosum.inventory.allocation.AllocationResult;
 import com.zerosum.inventory.allocation.InsufficientStockException;
+import com.zerosum.inventory.domain.SellableStock;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -2,6 +2,9 @@ package com.zerosum.inventory.posting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.PostingOutcome;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.util.ArrayList;
 import java.util.List;

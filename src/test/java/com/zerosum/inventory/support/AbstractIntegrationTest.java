@@ -2,11 +2,11 @@ package com.zerosum.inventory.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingOutcome;
 import com.zerosum.inventory.posting.PostingGateway;
 import com.zerosum.inventory.posting.PostingLineInput;
-import com.zerosum.inventory.posting.PostingOutcome;
 import com.zerosum.inventory.posting.PostingRequest;
-import com.zerosum.inventory.posting.Posted;
 import com.zerosum.inventory.posting.Preconditions;
 import java.nio.file.Files;
 import java.nio.file.Path;

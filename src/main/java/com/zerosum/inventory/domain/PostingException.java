@@ -1,4 +1,4 @@
-package com.zerosum.inventory.posting;
+package com.zerosum.inventory.domain;
 
 /**
  * 커맨드 검증·포스팅 적용 단계에서 발생하는 비즈니스 오류.

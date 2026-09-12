@@ -1,10 +1,13 @@
 package com.zerosum.inventory.allocation;
 
+import com.zerosum.inventory.domain.AllocationCandidate;
+import com.zerosum.inventory.domain.AllocationException;
+import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.IdempotencyConflictException;
+import com.zerosum.inventory.domain.SkuId;
+import com.zerosum.inventory.domain.WarehouseId;
 import com.zerosum.inventory.master.SkuRepository;
 import com.zerosum.inventory.master.WarehouseRepository;
-import com.zerosum.inventory.posting.IdempotencyConflictException;
-import com.zerosum.inventory.posting.SkuId;
-import com.zerosum.inventory.posting.WarehouseId;
 import com.zerosum.inventory.repository.AllocationRepository;
 import com.zerosum.inventory.repository.AllocationRepository.AllocationRow;
 import com.zerosum.inventory.repository.OutboxRepository;

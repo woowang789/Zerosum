@@ -3,6 +3,7 @@ package com.zerosum.inventory.posting;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.zerosum.inventory.domain.PostingException;
 import com.zerosum.inventory.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
