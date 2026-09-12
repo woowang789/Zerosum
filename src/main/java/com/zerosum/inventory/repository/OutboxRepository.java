@@ -1,7 +1,9 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.PostingCommand;
-import com.zerosum.inventory.posting.ResolvedLine;
+import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.domain.PostingCommand;
+import com.zerosum.inventory.domain.ResolvedLine;
+import com.zerosum.inventory.domain.SkuId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +82,32 @@ public class OutboxRepository {
                         jsonb_build_object('txnId', :txnId, 'txnType', :txnType, 'sourceRef', :sourceRef,
                                            'entries', %s))
                 """.formatted(entriesExpr))
+                .params(params)
+                .update();
+    }
+
+    /** db/04-harness.sql tst_allocate 끝의 StockAllocated 이벤트와 같다. 할당은 SKU 하나로 고정이라 쪼갤 필요가 없다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void appendStockAllocated(SkuId skuId, String orderLineRef, int qty, List<AllocationId> allocationIds) {
+        StringBuilder idsExpr = new StringBuilder("jsonb_build_array(");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("partitionKey", String.valueOf(skuId.value()));
+        params.put("orderLineRef", orderLineRef);
+        params.put("qty", qty);
+        for (int i = 0; i < allocationIds.size(); i++) {
+            if (i > 0) {
+                idsExpr.append(", ");
+            }
+            idsExpr.append(":id").append(i);
+            params.put("id" + i, allocationIds.get(i).value());
+        }
+        idsExpr.append(')');
+
+        jdbc.sql("""
+                INSERT INTO outbox_event (event_type, partition_key, payload)
+                VALUES ('StockAllocated', :partitionKey,
+                        jsonb_build_object('orderLineRef', :orderLineRef, 'qty', :qty, 'allocationIds', %s))
+                """.formatted(idsExpr))
                 .params(params)
                 .update();
     }

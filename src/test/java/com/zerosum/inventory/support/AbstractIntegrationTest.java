@@ -2,11 +2,11 @@ package com.zerosum.inventory.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zerosum.inventory.domain.Posted;
+import com.zerosum.inventory.domain.PostingOutcome;
 import com.zerosum.inventory.posting.PostingGateway;
 import com.zerosum.inventory.posting.PostingLineInput;
-import com.zerosum.inventory.posting.PostingOutcome;
 import com.zerosum.inventory.posting.PostingRequest;
-import com.zerosum.inventory.posting.Posted;
 import com.zerosum.inventory.posting.Preconditions;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -152,6 +152,42 @@ public abstract class AbstractIntegrationTest {
                 .single();
     }
 
+    /** 로케이션의 실사 표시. count_session_id는 실사 중이 아니면 널이다. */
+    protected Long countSessionIdOf(String warehouseCode, String locationCode) {
+        record Row(Long countSessionId) {
+        }
+        return jdbcClient.sql("""
+                SELECT count_session_id FROM location l JOIN warehouse w ON w.id = l.warehouse_id
+                WHERE w.code = :wh AND l.code = :loc
+                """)
+                .param("wh", warehouseCode)
+                .param("loc", locationCode)
+                .query((rs, rowNum) -> new Row((Long) rs.getObject("count_session_id")))
+                .single()
+                .countSessionId();
+    }
+
+    protected String countSessionStatus(long sessionId) {
+        return jdbcClient.sql("SELECT status FROM count_session WHERE id = :id")
+                .param("id", sessionId)
+                .query(String.class)
+                .single();
+    }
+
+    protected String txnType(long txnId) {
+        return jdbcClient.sql("SELECT txn_type FROM inventory_txn WHERE id = :id")
+                .param("id", txnId)
+                .query(String.class)
+                .single();
+    }
+
+    protected int openCountVarianceIssueCount() {
+        return jdbcClient
+                .sql("SELECT count(*) FROM inventory_issue WHERE issue_type = 'COUNT_VARIANCE' AND status = 'OPEN'")
+                .query(Integer.class)
+                .single();
+    }
+
     /** 원장을 직접 INSERT하는 등 저수준 테스트에 필요한 id 묶음. */
     protected record Ids(long warehouseId, long locationId, long skuId, long lotId) {
     }
@@ -169,5 +205,53 @@ public abstract class AbstractIntegrationTest {
                 .param("lot", lotNo)
                 .query((rs, rowNum) -> new Ids(rs.getLong("wh"), rs.getLong("loc"), rs.getLong("sku"), rs.getLong("lot")))
                 .single();
+    }
+
+    // ── 정합 검증 배치 (docs/06-events-reconciliation.md ①~⑤, db/04-harness.sql tst_recon과 동일) ──────
+
+    private record ReconciliationCheck(String label, int count) {
+    }
+
+    /**
+     * ①~⑤ 다섯 쿼리를 모두 실행해 전부 0건인지 단언한다. 실사는 잔액·원장·할당·로케이션 표시를 한꺼번에
+     * 건드려 불변식이 깨질 지점이 가장 많으므로, 이번에 만드는 실사 테스트는 모두 끝에서 이 메서드를 호출한다.
+     */
+    protected void assertReconciliationClean() {
+        List<ReconciliationCheck> checks = jdbcClient.sql("""
+                SELECT '① 잔액 투영 (I4)' AS label, count(*) AS cnt FROM (
+                  WITH ledger_sum AS (
+                    SELECT e.location_id, e.sku_id, e.lot_id, SUM(e.qty_delta) AS ledger_qty
+                    FROM inventory_ledger_entry e JOIN location l ON l.id = e.location_id
+                    WHERE NOT l.is_virtual GROUP BY e.location_id, e.sku_id, e.lot_id)
+                  SELECT b.location_id FROM stock_balance b
+                  FULL JOIN ledger_sum s USING (location_id, sku_id, lot_id)
+                  WHERE COALESCE(b.on_hand_qty, 0) <> COALESCE(s.ledger_qty, 0)) x
+                UNION ALL
+                SELECT '② 할당 (I5)', count(*) FROM (
+                  SELECT b.id FROM stock_balance b
+                  LEFT JOIN allocation a ON a.balance_id = b.id AND a.status = 'ACTIVE'
+                  GROUP BY b.id, b.allocated_qty HAVING b.allocated_qty <> COALESCE(SUM(a.qty), 0)) x
+                UNION ALL
+                SELECT '③ 원장 체인 (I7)', count(*) FROM (
+                  SELECT id FROM (
+                    SELECT e.*, COALESCE(LAG(e.on_hand_after) OVER w, 0) + e.qty_delta AS expected
+                    FROM inventory_ledger_entry e WHERE e.on_hand_after IS NOT NULL
+                    WINDOW w AS (PARTITION BY e.location_id, e.sku_id, e.lot_id ORDER BY e.id)) t
+                  WHERE on_hand_after <> expected) x
+                UNION ALL
+                SELECT '④ 가상 로케이션 잔액 행', count(*) FROM (
+                  SELECT b.id FROM stock_balance b JOIN location l ON l.id = b.location_id WHERE l.is_virtual) x
+                UNION ALL
+                SELECT '⑤ 실사 표시 (I10)', count(*) FROM (
+                  SELECT l.id FROM location l
+                  LEFT JOIN count_session s ON s.location_id = l.id AND s.status IN ('OPEN','REVIEW')
+                  WHERE l.count_session_id IS DISTINCT FROM s.id) x
+                """)
+                .query((rs, rowNum) -> new ReconciliationCheck(rs.getString("label"), rs.getInt("cnt")))
+                .list();
+
+        assertThat(checks)
+                .as("정합 검증 배치 ①~⑤(docs/06-events-reconciliation.md)는 모두 0건이어야 한다: %s", checks)
+                .allSatisfy(check -> assertThat(check.count()).as(check.label()).isZero());
     }
 }

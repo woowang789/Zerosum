@@ -1,5 +1,11 @@
 package com.zerosum.inventory.posting;
 
+import com.zerosum.inventory.domain.LocationId;
+import com.zerosum.inventory.domain.LotId;
+import com.zerosum.inventory.domain.PostingException;
+import com.zerosum.inventory.domain.ResolvedLine;
+import com.zerosum.inventory.domain.SkuId;
+import com.zerosum.inventory.domain.WarehouseId;
 import com.zerosum.inventory.master.Location;
 import com.zerosum.inventory.master.LocationRepository;
 import com.zerosum.inventory.master.Lot;

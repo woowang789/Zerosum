@@ -1,6 +1,6 @@
 package com.zerosum.inventory.repository;
 
-import com.zerosum.inventory.posting.PostingCommand;
+import com.zerosum.inventory.domain.PostingCommand;
 import java.sql.Timestamp;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;

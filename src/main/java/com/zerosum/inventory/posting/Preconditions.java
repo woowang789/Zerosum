@@ -1,5 +1,6 @@
 package com.zerosum.inventory.posting;
 
+import com.zerosum.inventory.domain.LockedBalances;
 import java.util.function.Predicate;
 
 /**

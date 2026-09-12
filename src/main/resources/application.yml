@@ -20,3 +20,11 @@ spring:
     hibernate:
       ddl-auto: none
     open-in-view: false
+
+# 실사 제출 허용 오차 (05-count-session.md). 코드에 기본값을 두지 않고 여기서만 주입한다.
+# 출발값은 "차이 1개 이하이면서 5% 이하"(AND) — 재고 20개 미만 로케이션은 1개 차이도 REVIEW로 간다.
+zerosum:
+  count:
+    tolerance:
+      qty: 1
+      pct: 0.05
