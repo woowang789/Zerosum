@@ -405,7 +405,8 @@ BEGIN
                     'COUNT', p_session::TEXT, 'COUNT_VARIANCE');
   UPDATE count_session SET status='CONFIRMED', closed_by=p_user, closed_at=now(), resolution_txn_id=v_txn
    WHERE id = p_session;
-  UPDATE inventory_issue SET status='RESOLVED', resolved_txn_id=v_txn
+  UPDATE inventory_issue SET status='RESOLVED', resolved_txn_id=v_txn,
+         resolved_by=p_user, resolved_at=now()
    WHERE issue_type='COUNT_VARIANCE' AND detail->>'countSessionId' = p_session::TEXT AND status='OPEN';
   RETURN v_txn;
 END;

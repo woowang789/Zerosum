@@ -28,3 +28,13 @@ zerosum:
     tolerance:
       qty: 1
       pct: 0.05
+  # 아웃박스 릴레이 (06-events-reconciliation.md). enabled=false면 스케줄러 빈 자체가 등록되지 않는다 —
+  # 테스트는 이걸로 끄고 OutboxRelayService#relayOnce()를 직접 호출한다.
+  outbox:
+    relay:
+      enabled: true
+      interval-ms: 5000
+  # 정합 검증 배치. 포트폴리오 규모에서는 전체 스캔으로 충분하다 (06-events-reconciliation.md).
+  reconciliation:
+    enabled: true
+    interval-ms: 300000

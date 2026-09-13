@@ -16,6 +16,7 @@ apply() { docker exec -i "$C" psql -v ON_ERROR_STOP=1 -U "$1" -d zerosum -q < "$
 apply postgres 00-roles.sql
 apply migrator  migration/V1__init.sql
 apply migrator  migration/V2__grants_and_views.sql
+apply migrator  migration/V3__issue_columns_and_indexes.sql
 apply app_admin 03-seed.sql
 apply migrator  04-harness.sql
 
