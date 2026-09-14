@@ -72,6 +72,16 @@ public class ReconciliationService {
         repo.resolve(issueId, who, resolvedTxnId, resolutionNote);
     }
 
+    /**
+     * {@link #resolve}의 "부수 효과" 버전 — 제안 승인 경로(ProposalApprovalService) 전용이다. 그 경로에서
+     * 이슈 종결은 목적이 아니라 재고 정정 뒤에 따라오는 부수 효과이므로, 이슈가 이미 닫혀 있어도 예외를
+     * 던지지 않고 조용히 넘어간다 ({@link ReconciliationRepository#resolveIfOpen} 참고). 사람이 직접 부르는
+     * {@link #resolve}는 이미 닫힌 이슈에 계속 예외를 던져야 하므로 이 메서드로 바꾸지 않는다.
+     */
+    public void resolveIfOpen(long issueId, String who, Long resolvedTxnId, String resolutionNote) {
+        repo.resolveIfOpen(issueId, who, resolvedTxnId, resolutionNote);
+    }
+
     private int recordProjectionMismatches() {
         int created = 0;
         for (ProjectionMismatch m : repo.findProjectionMismatches()) {

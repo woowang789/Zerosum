@@ -65,6 +65,20 @@ public class BasisRecheck {
         return Math.abs(current - observed) <= Math.max(observed * tolerancePct, 0);
     }
 
+    /**
+     * 관측값 하나의 대조 결과 — 승인 화면이 basis_snapshot과 현재 값을 나란히 보여줄 때 쓴다(할 일 3).
+     * {@code valid}는 withinTolerance()를 그대로 호출한 값이라, 여기서 유효로 보면 승인 시점 재검증도
+     * 같은 결과를 낸다 — 비교 로직을 화면용으로 새로 쓰지 않기 위한 장치다.
+     */
+    public record Comparison(int observed, int current, int diff, double allowedDiff, boolean valid) {
+    }
+
+    /** observed(basis_snapshot 값)와 current(지금 값)를 대조한다. balance·warehouse_sku 스코프 공용. */
+    public Comparison compare(int observed, int current) {
+        return new Comparison(observed, current, current - observed, Math.max(observed * tolerancePct, 0),
+                withinTolerance(current, observed));
+    }
+
     private record WarehouseSkuKey(long warehouseId, long skuId) {
     }
 }

@@ -77,6 +77,12 @@ public class ProposalCreationService {
             throw new ProposalException("REASON_CODE_REQUIRED",
                     "ADJUSTMENT 제안은 payload 최상위에 reasonCode가 있어야 한다 (승인 시점에 inventory_txn CHECK로 막힌다)");
         }
+        // issueId는 payload 안에 있고 그것을 쓴 것은 AI다 — 값을 무조건 믿고 승인 시점까지 넘기면, 존재하지
+        // 않거나 이미 닫힌 이슈를 가리킬 때 승인 트랜잭션 안의 이슈 종결이 문제가 된다. 여기서 미리 거부한다.
+        if (payload.issueId() != null && !repository.issueOpenOrAcked(payload.issueId())) {
+            throw new ProposalException("ISSUE_NOT_OPEN_OR_ACKED",
+                    "issueId(%d)가 가리키는 이슈가 없거나 이미 닫혀 있다".formatted(payload.issueId()));
+        }
 
         // 창고 스코핑은 여기(create_proposal, AI 쓰기 표면)에서만 강제한다 — PostingService 같은 일반
         // 쓰기 경로는 호출자가 이미 신뢰된 내부 서비스라 이 제약이 없다. entries[].wh는 실제로 실행될
