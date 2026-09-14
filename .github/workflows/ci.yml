@@ -42,6 +42,20 @@ jobs:
       - name: 테스트
         run: ./gradlew cleanTest test
 
+      # Gradle의 test 태스크는 테스트가 0개여도 성공한다. 탐색이 깨지면 BUILD SUCCESSFUL인데
+      # 아무것도 돌지 않은 상태가 초록불로 지나간다 — harness job의 grep 가드와 같은 이유로 막는다.
+      # 하한을 특정 숫자로 고정하지는 않는다. 테스트가 늘 때마다 이 파일을 고쳐야 하고, 잡으려는 것은
+      # "줄었다"가 아니라 "아무것도 돌지 않았다"이기 때문이다.
+      - name: 테스트가 실제로 돌았는지 확인
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          total = sum(int(ET.parse(p).getroot().get('tests', 0))
+                      for p in glob.glob('build/test-results/test/*.xml'))
+          print(f'실행된 테스트: {total}건')
+          sys.exit(0 if total > 0 else '테스트가 한 건도 실행되지 않았다')
+          PY
+
       - name: 실패 리포트 업로드
         if: failure()
         uses: actions/upload-artifact@v4
