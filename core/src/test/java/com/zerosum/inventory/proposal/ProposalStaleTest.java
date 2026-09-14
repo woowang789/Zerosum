@@ -140,7 +140,7 @@ class ProposalStaleTest extends AbstractIntegrationTest {
             List<BasisRef> basisRefs) {
         CreateProposalRequest request = new CreateProposalRequest(proposalType, payloadJson, "테스트 사유",
                 "agent:test", null, basisRefs);
-        CreateProposalOutcome outcome = proposalCreationService.create(request);
+        CreateProposalOutcome outcome = proposalCreationService.create(request, "ICN01");
         return ((ProposalCreated) outcome).proposalId();
     }
 

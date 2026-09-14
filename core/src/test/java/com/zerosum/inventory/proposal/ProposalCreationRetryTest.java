@@ -60,10 +60,10 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
     void identicalPayloadRetryReturnsSameProposalId() {
         receiveColdBrew("A-01-01-2", 100);
 
-        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
         long id = ((ProposalCreated) first).proposalId();
 
-        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
 
         assertThat(second).isEqualTo(new ProposalDuplicate(id));
         assertThat(proposalCount()).as("제안은 1건").isEqualTo(1);
@@ -74,11 +74,11 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
     void keyOrderAndWhitespaceDoNotCreateSecondProposal() {
         receiveColdBrew("A-01-01-2", 100);
 
-        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
         long id = ((ProposalCreated) first).proposalId();
 
         CreateProposalOutcome second = proposalCreationService
-                .create(moveRequest(MOVE_PAYLOAD_KEY_ORDER_AND_WHITESPACE));
+                .create(moveRequest(MOVE_PAYLOAD_KEY_ORDER_AND_WHITESPACE), "ICN01");
 
         assertThat(second).isEqualTo(new ProposalDuplicate(id));
         assertThat(proposalCount()).as("제안은 1건").isEqualTo(1);
@@ -89,10 +89,11 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
     void entryArrayOrderIsCanonicalized() {
         receiveColdBrew("A-01-01-2", 100);
 
-        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
         long id = ((ProposalCreated) first).proposalId();
 
-        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD_ENTRIES_SWAPPED));
+        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD_ENTRIES_SWAPPED),
+                "ICN01");
 
         assertThat(second).isEqualTo(new ProposalDuplicate(id));
         assertThat(proposalCount()).as("제안은 1건").isEqualTo(1);
@@ -103,10 +104,11 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
     void integerAndDecimalQtyCanonicalizeToSame() {
         receiveColdBrew("A-01-01-2", 100);
 
-        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
         long id = ((ProposalCreated) first).proposalId();
 
-        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD_DECIMAL_QTY));
+        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD_DECIMAL_QTY),
+                "ICN01");
 
         assertThat(second).isEqualTo(new ProposalDuplicate(id));
         assertThat(proposalCount()).as("제안은 1건").isEqualTo(1);
@@ -128,7 +130,7 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
                     .<Callable<CreateProposalOutcome>>mapToObj(i -> () -> {
                         ready.countDown();
                         go.await();
-                        return proposalCreationService.create(request);
+                        return proposalCreationService.create(request, "ICN01");
                     })
                     .toList();
             for (Callable<CreateProposalOutcome> task : tasks) {
@@ -155,7 +157,7 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
     void executedProposalAllowsIdenticalNewProposal() {
         receiveColdBrew("A-01-01-2", 100);
 
-        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome first = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
         long firstId = ((ProposalCreated) first).proposalId();
 
         long txnId = postAndExpectSuccess(request("move:PROP-EXEC-01", "MOVE", null, null,
@@ -171,7 +173,7 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
                 .param("id", firstId)
                 .update();
 
-        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD));
+        CreateProposalOutcome second = proposalCreationService.create(moveRequest(MOVE_PAYLOAD), "ICN01");
 
         assertThat(second).isInstanceOf(ProposalCreated.class);
         assertThat(((ProposalCreated) second).proposalId()).isNotEqualTo(firstId);
@@ -181,11 +183,13 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
 
     @Test
     void unsupportedProposalTypeIsRejectedAtCreation() {
-        assertThatThrownBy(() -> proposalCreationService.create(requestOfType("TRANSFER", MOVE_PAYLOAD)))
+        assertThatThrownBy(() -> proposalCreationService.create(requestOfType("TRANSFER", MOVE_PAYLOAD), "ICN01"))
                 .isInstanceOf(ProposalException.class);
-        assertThatThrownBy(() -> proposalCreationService.create(requestOfType("RECEIPT_DRAFT", MOVE_PAYLOAD)))
+        assertThatThrownBy(
+                () -> proposalCreationService.create(requestOfType("RECEIPT_DRAFT", MOVE_PAYLOAD), "ICN01"))
                 .isInstanceOf(ProposalException.class);
-        assertThatThrownBy(() -> proposalCreationService.create(requestOfType("RESOLVE_COUNT", MOVE_PAYLOAD)))
+        assertThatThrownBy(
+                () -> proposalCreationService.create(requestOfType("RESOLVE_COUNT", MOVE_PAYLOAD), "ICN01"))
                 .isInstanceOf(ProposalException.class);
 
         String adjustmentWithoutReasonCode = """
@@ -193,7 +197,8 @@ class ProposalCreationRetryTest extends AbstractIntegrationTest {
                    {"wh":"ICN01","loc":"A-01-01-2","sku":"SKU-200002","lot":"L20260910-B","qty":-5}]}
                 """;
         assertThatThrownBy(
-                () -> proposalCreationService.create(requestOfType("ADJUSTMENT", adjustmentWithoutReasonCode)))
+                () -> proposalCreationService.create(requestOfType("ADJUSTMENT", adjustmentWithoutReasonCode),
+                        "ICN01"))
                 .isInstanceOf(ProposalException.class);
 
         assertThat(proposalCount()).as("거부된 제안은 하나도 저장되지 않는다").isZero();

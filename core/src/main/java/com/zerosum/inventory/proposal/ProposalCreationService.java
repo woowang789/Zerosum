@@ -31,8 +31,12 @@ public class ProposalCreationService {
         this.ttl = Duration.ofMinutes(ttlMinutes);
     }
 
-    public CreateProposalOutcome create(CreateProposalRequest request) {
-        validate(request);
+    /**
+     * @param allowedWarehouseCode 호출자(어댑터)가 자신이 누구인지 밝히는 값 — 이 제안이 건드릴 수 있는
+     *         유일한 창고. 널을 허용해 "제한 없음"을 표현하지 않는다: 모든 호출자가 범위를 명시해야 한다.
+     */
+    public CreateProposalOutcome create(CreateProposalRequest request, String allowedWarehouseCode) {
+        validate(request, allowedWarehouseCode);
 
         OptionalLong created = repository.insertCanonical(request.proposalType(), request.commandPayloadJson(),
                 request.rationale(), request.proposedBy(), request.agentMetaJson(), request.basisRefs(), ttl);
@@ -50,7 +54,7 @@ public class ProposalCreationService {
                 "제안 충돌은 감지했지만 PENDING 제안을 찾지 못했다 (그 사이 승인·만료된 것으로 보인다)");
     }
 
-    private void validate(CreateProposalRequest request) {
+    private void validate(CreateProposalRequest request, String allowedWarehouseCode) {
         if (!SUPPORTED_TYPES.contains(request.proposalType())) {
             throw new ProposalException("UNSUPPORTED_PROPOSAL_TYPE",
                     "지원하지 않는 proposalType: %s".formatted(request.proposalType()));
@@ -72,6 +76,19 @@ public class ProposalCreationService {
         if ("ADJUSTMENT".equals(request.proposalType()) && payload.reasonCode() == null) {
             throw new ProposalException("REASON_CODE_REQUIRED",
                     "ADJUSTMENT 제안은 payload 최상위에 reasonCode가 있어야 한다 (승인 시점에 inventory_txn CHECK로 막힌다)");
+        }
+
+        // 창고 스코핑은 여기(create_proposal, AI 쓰기 표면)에서만 강제한다 — PostingService 같은 일반
+        // 쓰기 경로는 호출자가 이미 신뢰된 내부 서비스라 이 제약이 없다. entries[].wh는 실제로 실행될
+        // 커맨드이므로 반드시 보고, basisRefs.warehouseCode는 LLM이 주는 근거 캡처 좌표라 같은 김에 본다.
+        if (payload.warehouseCodes().stream().anyMatch(wh -> !allowedWarehouseCode.equals(wh))) {
+            throw new ProposalException("WAREHOUSE_OUT_OF_SCOPE",
+                    "commandPayloadJson의 entries에 이 호출자 권한(%s) 밖 창고가 있다: %s"
+                            .formatted(allowedWarehouseCode, payload.warehouseCodes()));
+        }
+        if (request.basisRefs().stream().anyMatch(ref -> !allowedWarehouseCode.equals(ref.warehouseCode()))) {
+            throw new ProposalException("WAREHOUSE_OUT_OF_SCOPE",
+                    "basisRefs에 이 호출자 권한(%s) 밖 창고가 있다".formatted(allowedWarehouseCode));
         }
     }
 }

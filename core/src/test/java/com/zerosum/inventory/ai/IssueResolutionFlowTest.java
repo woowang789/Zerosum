@@ -60,7 +60,7 @@ class IssueResolutionFlowTest extends AbstractIntegrationTest {
         CreateProposalRequest createRequest = new CreateProposalRequest("ADJUSTMENT", payload, "실사에서 +5 오차 확인",
                 "agent:ai", null,
                 List.of(BasisRef.balance("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT")));
-        CreateProposalOutcome created = proposalCreationService.create(createRequest);
+        CreateProposalOutcome created = proposalCreationService.create(createRequest, "ICN01");
         long proposalId = ((ProposalCreated) created).proposalId();
 
         // ③ 사람이 승인해 실행 — 실행 거래의 주체는 승인자다 (AI가 아니다)

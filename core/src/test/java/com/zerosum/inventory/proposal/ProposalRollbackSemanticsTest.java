@@ -109,7 +109,7 @@ class ProposalRollbackSemanticsTest extends AbstractIntegrationTest {
     private long createMoveProposal(String payloadJson) {
         CreateProposalRequest request = new CreateProposalRequest("MOVE", payloadJson, "테스트 사유", "agent:test", null,
                 List.of(BasisRef.balance("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B")));
-        CreateProposalOutcome outcome = proposalCreationService.create(request);
+        CreateProposalOutcome outcome = proposalCreationService.create(request, "ICN01");
         return ((ProposalCreated) outcome).proposalId();
     }
 

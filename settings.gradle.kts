@@ -1,2 +1,2 @@
 rootProject.name = "zerosum"
-include(":core")
+include(":core", ":mcp-server")

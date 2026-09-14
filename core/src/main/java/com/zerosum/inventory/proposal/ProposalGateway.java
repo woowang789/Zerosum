@@ -34,8 +34,8 @@ public class ProposalGateway {
         this.retryTemplate = new RetryTemplate(retryPolicy);
     }
 
-    public CreateProposalOutcome create(CreateProposalRequest request) {
-        return creationService.create(request);
+    public CreateProposalOutcome create(CreateProposalRequest request, String allowedWarehouseCode) {
+        return creationService.create(request, allowedWarehouseCode);
     }
 
     public ApprovalOutcome approve(long proposalId, String approver) {

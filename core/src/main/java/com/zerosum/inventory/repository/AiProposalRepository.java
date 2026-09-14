@@ -152,22 +152,37 @@ public class AiProposalRepository {
      * 결과 — 로 payload를 읽는다. 원본 JSON 텍스트에 정규식을 걸면, 정규화가 버리는 위치(엔트리 안쪽 등)에
      * 있는 값에 속아 검증과 저장 결과가 어긋난다. 테이블을 건드리지 않는 순수 JSONB 표현식이라 ai_proposer
      * 권한으로도 실행할 수 있다.
+     *
+     * <p>warehouseCodes는 entries[].wh의 중복 제거 목록이다 — AI 쓰기 표면(create_proposal)의 창고 스코핑
+     * 검증(ProposalCreationService)에 쓴다.
      */
-    public record PayloadValidation(String txnType, String reasonCode, boolean hasEntries) {
+    public record PayloadValidation(String txnType, String reasonCode, boolean hasEntries,
+            List<String> warehouseCodes) {
     }
 
-    /** txnType·reasonCode는 최상위 값만(정규화가 남기는 것과 동일), entries는 비어 있지 않은지만 본다. */
+    /**
+     * txnType·reasonCode는 최상위 값만(정규화가 남기는 것과 동일), entries는 비어 있지 않은지만 본다.
+     * warehouseCodes는 entries[].wh를 jsonb_to_recordset으로 펼쳐 중복 제거한 목록이다.
+     */
     public PayloadValidation validatePayload(String payloadJson) {
         return jdbc.sql("""
                 SELECT CAST(:payload AS JSONB) ->> 'txnType' AS txn_type,
                        CAST(:payload AS JSONB) ->> 'reasonCode' AS reason_code,
                        jsonb_array_length(COALESCE(CAST(:payload AS JSONB) -> 'entries', '[]'::JSONB)) > 0
-                           AS has_entries
+                           AS has_entries,
+                       (SELECT COALESCE(array_agg(DISTINCT e.wh), ARRAY[]::TEXT[])
+                          FROM jsonb_to_recordset(COALESCE(CAST(:payload AS JSONB) -> 'entries', '[]'::JSONB))
+                                 AS e(wh TEXT)) AS warehouse_codes
                 """)
                 .param("payload", payloadJson)
                 .query((rs, rowNum) -> new PayloadValidation(rs.getString("txn_type"), rs.getString("reason_code"),
-                        rs.getBoolean("has_entries")))
+                        rs.getBoolean("has_entries"), toStringList(rs.getArray("warehouse_codes"))))
                 .single();
+    }
+
+    /** java.sql.Array(TEXT[]) → List<String>. array_agg가 빈 결과일 때도 ARRAY[]::TEXT[]라 null은 아니다. */
+    private static List<String> toStringList(java.sql.Array array) throws java.sql.SQLException {
+        return array == null ? List.of() : List.of((String[]) array.getArray());
     }
 
     // basisRefs는 필드 다섯 개짜리 단순 구조라 Jackson 없이 직접 JSON 텍스트를 만든다

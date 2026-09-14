@@ -1,0 +1,57 @@
+# STDIO 전송: stdout은 JSON-RPC 프레임 전용이다. 배너는 여기서 끄고, 콘솔 로그는 logback-spring.xml에서
+# stderr로 돌린다(logging.pattern.console을 빈 값으로 두는 방법은 Logback이 "Empty or null pattern" 오류를
+# 내며 이후 로그를 전부 삼켜버려 부팅 실패 원인조차 안 보이는 걸 실측으로 확인해 버렸다).
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+  application:
+    name: zerosum-mcp-server
+
+  # 코어(AiDataSourceConfig 밖 나머지 빈)가 요구하는 기본 DataSource. app_rw는 원장 UPDATE·DELETE 권한이 없다.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zerosum
+    username: app_rw
+    password: app_rw
+
+  # 마이그레이션은 이 프로세스의 몫이 아니다 — db/run.sh 등 별도 경로로 이미 적용돼 있다고 가정한다.
+  flyway:
+    enabled: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+zerosum:
+  # 이 MCP 서버 프로세스가 담당하는 창고 하나. InventoryTools의 모든 조회·쓰기 도구가 이 값으로만 범위가 좁혀진다.
+  mcp:
+    warehouse-code: ICN01
+    proposed-by: "agent:mcp-server"
+
+  count:
+    tolerance:
+      qty: 1
+      pct: 0.05
+
+  # 아웃박스 릴레이·정합 검증 배치는 쓰기 경로(:core의 앱)가 돌리는 배치다. MCP 서버는 도구 6개만 서빙하므로 끈다.
+  outbox:
+    relay:
+      enabled: false
+  reconciliation:
+    enabled: false
+
+  ai:
+    read:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_ro
+      password: ai_ro
+    proposer:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_proposer
+      password: ai_proposer
+
+  proposal:
+    ttl-minutes: 60
+    basis:
+      tolerance-pct: 0.10
