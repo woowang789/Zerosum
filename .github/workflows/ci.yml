@@ -50,8 +50,10 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob, sys, xml.etree.ElementTree as ET
+          # 멀티모듈 전환 후 결과가 core/build/... 아래로 내려갔고, 모듈이 더 늘어날 예정이므로
+          # 모듈 디렉터리를 고정하지 않고 **로 재귀 탐색한다 (recursive=True 필수).
           total = sum(int(ET.parse(p).getroot().get('tests', 0))
-                      for p in glob.glob('build/test-results/test/*.xml'))
+                      for p in glob.glob('**/build/test-results/test/*.xml', recursive=True))
           print(f'실행된 테스트: {total}건')
           sys.exit(0 if total > 0 else '테스트가 한 건도 실행되지 않았다')
           PY
@@ -61,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: build/reports/tests/test/
+          path: '**/build/reports/tests/test/'
           retention-days: 7
 
   harness:
