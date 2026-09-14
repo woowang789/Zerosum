@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- STDIO 전송용: stdout은 JSON-RPC 프레임 전용이라 로그는 콘솔에 내보내더라도 반드시 stderr로 가야 한다.
+         Boot 기본 console-appender.xml은 System.out에 붙으므로 include하지 않고, 여기서 System.err에
+         붙는 appender를 직접 만든다(defaults.xml의 CONSOLE_LOG_PATTERN만 가져다 쓴다). -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="STDERR"/>
+    </root>
+</configuration>
