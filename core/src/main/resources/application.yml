@@ -39,6 +39,8 @@ zerosum:
     enabled: true
     interval-ms: 300000
   # AI 전용 커넥션 (docs/07-ai-integration.md 권한 경계). app_rw와 별도 계정·별도 풀을 쓴다.
+  # 이 블록(특히 read.url·proposer.url)이 없으면 AiDataSourceConfig의 빈 자체가 등록되지 않고,
+  # AI 조회·분석·제안 생성 관련 빈도 함께 빠진다 (AiDataSourceConfig의 @ConditionalOnProperty 참고).
   ai:
     # ai_ro: 조회 뷰(v_ledger·v_open_issue·v_count_history)만 읽는다.
     read:
