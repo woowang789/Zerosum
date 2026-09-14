@@ -38,3 +38,23 @@ zerosum:
   reconciliation:
     enabled: true
     interval-ms: 300000
+  # AI 전용 커넥션 (docs/07-ai-integration.md 권한 경계). app_rw와 별도 계정·별도 풀을 쓴다.
+  ai:
+    # ai_ro: 조회 뷰(v_ledger·v_open_issue·v_count_history)만 읽는다.
+    read:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_ro
+      password: ai_ro
+    # ai_proposer: 제안 INSERT와 inventory_issue.ai_analysis UPDATE만 할 수 있다.
+    proposer:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_proposer
+      password: ai_proposer
+  # AI 제안(action_proposal) 관련 설정.
+  proposal:
+    # 제안의 유효 기간(분). 만료된 제안은 실행하지 않는다.
+    ttl-minutes: 60
+    basis:
+      # basis_snapshot과 실제 재고의 허용 오차. 코드에 기본값을 두지 않는다 —
+      # zerosum.count.tolerance와 같은 규칙으로, 운영 설정에서만 온다.
+      tolerance-pct: 0.10

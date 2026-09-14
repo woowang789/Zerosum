@@ -8,7 +8,9 @@
 | app_admin | 프라이머리 | 마스터(`warehouse`·`location`·`sku`·`lot`) 읽기·쓰기. 코어 테이블은 조회만 |
 | app_rw | 프라이머리 | 코어 테이블 읽기·쓰기. `inventory_txn`, `inventory_ledger_entry`는 SELECT·INSERT만. 마스터는 조회만 하며 예외는 `location.count_session_id` 한 컬럼뿐이다 |
 | ai_ro | 레플리카 | 조회용 뷰 SELECT만 |
-| ai_proposer | 프라이머리 | `action_proposal` INSERT만 |
+| ai_proposer | 프라이머리 | 조회 뷰(`v_balance_basis`, `v_warehouse_sku_basis`) SELECT, `action_proposal` 일부 컬럼 SELECT·INSERT, `inventory_issue`는 (id, status) SELECT + (ai_analysis) UPDATE — 아래 단락 참고 |
+
+ai_proposer 행은 처음엔 "`action_proposal` INSERT만"으로 적었지만 실측해보니 그대로는 성립하지 않았다. `INSERT ... RETURNING id`는 SELECT 권한을 요구하는데 그 권한이 없으면 42501로 거부돼 새로 만든 제안의 id를 돌려줄 수 없었고, 잔액을 읽을 권한도 없어 `basis_snapshot`을 서버가 직접 채우는 규칙([basis_snapshot](#제안-실행-규칙) 문단)과도 모순됐다. 그래서 V4 마이그레이션은 권한을 컬럼 단위로만 넓혔다 — 조회 뷰 SELECT, `action_proposal`은 `id, proposal_type, command_payload, status, created_at, expires_at` 컬럼만 SELECT(+INSERT), `inventory_issue`는 (id, status) SELECT + (ai_analysis) UPDATE.
 
 마스터 쓰기를 일상 쓰기 경로에서 떼어낸 이유는 사고의 성격이 다르기 때문이다. 로케이션을 하나 잘못 만들면 재고가 유령 로케이션으로 들어가고, SKU 코드를 잘못 고치면 이력이 통째로 어긋난다. 되돌리려면 조정 거래가 아니라 마이그레이션이 필요하다.
 
@@ -33,7 +35,11 @@ JOIN lot l        ON l.id   = b.lot_id;
 GRANT SELECT ON v_available_stock TO ai_ro;
 ```
 
-MCP 서버는 조회 도구로 `get_available_stock`, `get_ledger`(SKU·로케이션·기간), `list_open_issues`, `get_issue_context`(이슈 전후 원장과 실사 이력 묶음)를 제공하고, 쓰기 도구는 `create_proposal` 하나만 제공한다. 창고 접근 권한은 LLM에게 맡기지 않고 도구 내부에서 호출자 기준으로 강제한다. 에이전트가 재시도로 같은 제안을 여러 번 넣어도 `uq_proposal_pending` 인덱스 때문에 대기 중인 제안은 하나만 남는다.
+MCP 서버는 조회 도구로 `get_available_stock`, `get_ledger`(SKU·로케이션·기간), `list_open_issues`, `get_issue_context`(이슈 전후 원장과 실사 이력 묶음)를 제공하고, 쓰기 도구는 `create_proposal`과 `write_issue_analysis` 둘이다 — 불일치 원인 분석까지 AI에게 위임하기로 하면서 후자가 추가됐다. 창고 접근 권한은 LLM에게 맡기지 않고 도구 내부에서 호출자 기준으로 강제한다. 에이전트가 재시도로 같은 제안을 여러 번 넣어도 `uq_proposal_pending` 인덱스 때문에 대기 중인 제안은 하나만 남는다.
+
+이슈의 상태 전이(`acknowledge`·`resolve`)는 AI에게 위임하지 않는다 — `write_issue_analysis`가 건드릴 수 있는 것은 `ai_analysis` 컬럼 하나뿐이고, `status`·`acked_*`·`resolved_*`는 ai_proposer 계정 자체에 컬럼 권한이 없어 SQL 문법 수준에서부터 막힌다(V4의 컬럼 단위 GRANT). 이 보장의 범위는 정확히 "ai_proposer 커넥션으로는 불가능"이지 "아무도 불가능"이 아니다 — app_rw로 접속하는 사람 쪽 코드(`ReconciliationService`)는 여전히 그 컬럼들을 바꿀 수 있고, 실제로 이슈를 닫는 것도 그쪽이다.
+
+MCP 전송 계층(`spring-ai-starter-mcp-server-webmvc` 등)은 4단계 범위가 아니다. 도구 계약은 이미 `AiQueryService`·`AiAnalysisService`의 메서드 이름과 1:1로 고정돼 있어 전송 어댑터를 붙여도 위임 코드 몇 줄만 늘어난다. 넣지 않은 이유는 득실 계산 때문이다 — 톰캣 서블릿 컨테이너가 붙으면 `@SpringBootTest`의 컨텍스트 종류가 바뀌어 이 프로젝트의 테스트 전체가 그 영향권에 들어가는데, 얻는 것은 JSON-RPC 프레이밍이 동작한다는 확인뿐이라 정합성에 대한 주장이 아니다.
 
 ## 제안 실행 규칙
 
@@ -80,6 +86,8 @@ basis 재검증은 포스팅 서비스가 잔액 행을 잠근 직후에 실행�
 승인자가 제안 내용을 고쳐야 하면 제안 행을 직접 수정하지 않는다. 원 제안은 REJECTED로 닫고 수정본을 사용자 명의의 새 제안으로 올려야 AI가 무엇을 틀렸는지 기록이 남는다. 입고 서류 제안은 문서 해시가 같은 PENDING·EXECUTED 제안이 이미 있으면 생성 단계에서 거부해 같은 서류의 이중 입고를 막는다.
 
 AI가 만든 커맨드는 사람이 만든 커맨드와 똑같은 검증을 통과해야 한다. 수량, 로케이션, 로트 어느 것도 AI가 계산했으니 맞다고 가정하지 않는다.
+
+4단계가 지원하는 제안 타입은 `MOVE`·`ADJUSTMENT` 둘뿐이다. 나머지는 이번 단계 범위 밖이다 — `TRANSFER`는 거래가 두 건(출고·입고) 필요한데 `executed_txn_id`는 단일 값에 UNIQUE 제약이 걸려 있어(I8) 제안 하나에 담을 수 없다. `RECEIPT_DRAFT`는 대사할 발주 데이터 자체가 스키마에 없다. `RESOLVE_COUNT`는 `CountSessionService.resolve`가 수량 인자를 받지 않아(그 세션의 `count_result`를 그대로 반영할 뿐이다) basis를 재검증할 대상이 없다.
 
 ## 기능별 데이터 매핑
 

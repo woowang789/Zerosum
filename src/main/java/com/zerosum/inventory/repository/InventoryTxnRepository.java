@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 거래 헤더 기록. proposal_id는 1단계 범위 밖(AI 제안)이라 항상 NULL이다. */
+/** 거래 헤더 기록. proposal_id는 AI 제안 승인으로 실행됐으면 그 제안 id, 아니면 널이다 (4단계). */
 @Repository
 public class InventoryTxnRepository {
 
@@ -24,7 +24,7 @@ public class InventoryTxnRepository {
                     (idem_key, txn_type, source_type, source_ref, reason_code,
                      actor_type, actor_id, proposal_id, reverses_txn_id, occurred_at)
                 VALUES (:idemKey, :txnType, :sourceType, :sourceRef, :reasonCode,
-                        :actorType, :actorId, NULL, :reversesTxnId, :occurredAt)
+                        :actorType, :actorId, :proposalId, :reversesTxnId, :occurredAt)
                 RETURNING id
                 """)
                 .param("idemKey", cmd.idemKey())
@@ -34,6 +34,7 @@ public class InventoryTxnRepository {
                 .param("reasonCode", cmd.reasonCode())
                 .param("actorType", cmd.actorType())
                 .param("actorId", cmd.actorId())
+                .param("proposalId", cmd.proposalId())
                 .param("reversesTxnId", cmd.reversesTxnId())
                 .param("occurredAt", Timestamp.from(cmd.occurredAt()))
                 .query(Long.class)

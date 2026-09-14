@@ -69,6 +69,13 @@ public abstract class AbstractIntegrationTest {
         // 관련 테스트는 OutboxRelayService#relayOnce()·ReconciliationService#runOnce()를 직접 호출한다.
         registry.add("zerosum.outbox.relay.enabled", () -> "false");
         registry.add("zerosum.reconciliation.enabled", () -> "false");
+        // AI 전용 커넥션(ai_ro·ai_proposer)도 같은 컨테이너를 본다 (롤은 위 init 스크립트 db/00-roles.sql이 만든다).
+        registry.add("zerosum.ai.read.url", POSTGRES::getJdbcUrl);
+        registry.add("zerosum.ai.read.username", () -> "ai_ro");
+        registry.add("zerosum.ai.read.password", () -> "ai_ro");
+        registry.add("zerosum.ai.proposer.url", POSTGRES::getJdbcUrl);
+        registry.add("zerosum.ai.proposer.username", () -> "ai_proposer");
+        registry.add("zerosum.ai.proposer.password", () -> "ai_proposer");
     }
 
     @Autowired
