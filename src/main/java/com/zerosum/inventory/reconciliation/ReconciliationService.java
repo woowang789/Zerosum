@@ -6,6 +6,8 @@ import com.zerosum.inventory.repository.ReconciliationRepository.ChainBreak;
 import com.zerosum.inventory.repository.ReconciliationRepository.CountFlagMismatch;
 import com.zerosum.inventory.repository.ReconciliationRepository.ProjectionMismatch;
 import com.zerosum.inventory.repository.ReconciliationRepository.VirtualLocationBalance;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 /**
@@ -54,9 +56,17 @@ public class ReconciliationService {
 
     /**
      * 이슈 종결. resolvedTxnId는 조정 거래로 바로잡은 경우에만 있고, 코드 수정 등 거래 없이 종결한
-     * 경우 널이다 — 그때는 resolutionNote로 이유를 남긴다. 4단계에서는 AI가 ai_analysis에 원인
-     * 후보를 쓰고 action_proposal로 복구 커맨드를 제안, 사람이 승인해 실행된 거래 id가 이 메서드의
-     * resolvedTxnId로 들어오는 흐름이 될 예정이다 — 지금은 그 자리만 비워 둔다.
+     * 경우 널이다 — 그때는 resolutionNote로 이유를 남긴다.
+     *
+     * <p>4단계에서 채워진 흐름: 배치가 이슈를 OPEN으로 남기면, {@link com.zerosum.inventory.ai.AiAnalysisService}가
+     * inventory_issue.ai_analysis에 원인 후보를 쓰고, {@link com.zerosum.inventory.proposal.ProposalCreationService}가
+     * 복구 커맨드를 action_proposal로 제안한다. 사람이 {@link com.zerosum.inventory.proposal.ProposalApprovalService}로
+     * 승인해 실행하면(그 거래의 actor_type은 USER, 주체는 승인자다) 그 거래 id가 이 메서드의 resolvedTxnId로
+     * 들어와 RESOLVED가 된다.
+     *
+     * <p><b>AI는 이 사슬 어디에서도 상태 전이를 하지 않는다.</b> ai_analysis를 쓰는 것과 제안을 올리는 것까지가
+     * AI의 몫이고, 이 메서드는 항상 사람(승인자 등)이 부른다 — V4 마이그레이션의 컬럼 단위 GRANT가 ai_proposer
+     * 계정 자체에 status·acked_*·resolved_* 컬럼 권한을 주지 않아 DB가 그것을 강제한다.
      */
     public void resolve(long issueId, String who, Long resolvedTxnId, String resolutionNote) {
         repo.resolve(issueId, who, resolvedTxnId, resolutionNote);
@@ -65,7 +75,9 @@ public class ReconciliationService {
     private int recordProjectionMismatches() {
         int created = 0;
         for (ProjectionMismatch m : repo.findProjectionMismatches()) {
-            String detail = "{\"onHandQty\": %d, \"ledgerQty\": %d}".formatted(m.onHandQty(), m.ledgerQty());
+            Map<String, Long> detail = new LinkedHashMap<>();
+            detail.put("onHandQty", (long) m.onHandQty());
+            detail.put("ledgerQty", (long) m.ledgerQty());
             if (repo.recordIssueIfAbsent("PROJECTION_MISMATCH", "CRITICAL", m.locationId(), m.skuId(), m.lotId(),
                     detail)) {
                 created++;
@@ -77,8 +89,10 @@ public class ReconciliationService {
     private int recordAllocationMismatches() {
         int created = 0;
         for (AllocationMismatch m : repo.findAllocationMismatches()) {
-            String detail = "{\"balanceId\": %d, \"allocatedQty\": %d, \"activeQty\": %d}"
-                    .formatted(m.balanceId(), m.allocatedQty(), m.activeQty());
+            Map<String, Long> detail = new LinkedHashMap<>();
+            detail.put("balanceId", m.balanceId());
+            detail.put("allocatedQty", (long) m.allocatedQty());
+            detail.put("activeQty", (long) m.activeQty());
             if (repo.recordIssueIfAbsent("ALLOCATION_MISMATCH", "HIGH", m.locationId(), m.skuId(), m.lotId(),
                     detail)) {
                 created++;
@@ -91,8 +105,11 @@ public class ReconciliationService {
         int created = 0;
         // 원인 분석의 출발점이 되는 원장 줄과 거래 id를 detail에 담는다 (3단계 작업 지시).
         for (ChainBreak m : repo.findChainBreaks()) {
-            String detail = "{\"ledgerEntryId\": %d, \"txnId\": %d, \"onHandAfter\": %d, \"expected\": %d}"
-                    .formatted(m.ledgerEntryId(), m.txnId(), m.onHandAfter(), m.expected());
+            Map<String, Long> detail = new LinkedHashMap<>();
+            detail.put("ledgerEntryId", m.ledgerEntryId());
+            detail.put("txnId", m.txnId());
+            detail.put("onHandAfter", (long) m.onHandAfter());
+            detail.put("expected", (long) m.expected());
             if (repo.recordIssueIfAbsent("CHAIN_BREAK", "CRITICAL", m.locationId(), m.skuId(), m.lotId(), detail)) {
                 created++;
             }
@@ -103,7 +120,8 @@ public class ReconciliationService {
     private int recordVirtualLocationBalances() {
         int created = 0;
         for (VirtualLocationBalance m : repo.findVirtualLocationBalances()) {
-            String detail = "{\"balanceId\": %d}".formatted(m.balanceId());
+            Map<String, Long> detail = new LinkedHashMap<>();
+            detail.put("balanceId", m.balanceId());
             if (repo.recordIssueIfAbsent("VIRTUAL_LOCATION_BALANCE", "MEDIUM", m.locationId(), m.skuId(), m.lotId(),
                     detail)) {
                 created++;
@@ -115,9 +133,9 @@ public class ReconciliationService {
     private int recordCountFlagMismatches() {
         int created = 0;
         for (CountFlagMismatch m : repo.findCountFlagMismatches()) {
-            String flagged = m.flaggedSessionId() == null ? "null" : String.valueOf(m.flaggedSessionId());
-            String active = m.activeSessionId() == null ? "null" : String.valueOf(m.activeSessionId());
-            String detail = "{\"flaggedSessionId\": %s, \"activeSessionId\": %s}".formatted(flagged, active);
+            Map<String, Long> detail = new LinkedHashMap<>();
+            detail.put("flaggedSessionId", m.flaggedSessionId());
+            detail.put("activeSessionId", m.activeSessionId());
             // SKU·로트와 무관한 로케이션 단위 불일치라 sku_id·lot_id는 null이다.
             if (repo.recordIssueIfAbsent("COUNT_FLAG_MISMATCH", "LOW", m.locationId(), null, null, detail)) {
                 created++;

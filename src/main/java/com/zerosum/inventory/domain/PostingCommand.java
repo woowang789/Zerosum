@@ -21,7 +21,8 @@ public record PostingCommand(
         String reasonCode,
         Long reversesTxnId,
         Instant occurredAt,
-        List<Long> consumeAllocationIds) {
+        List<Long> consumeAllocationIds,
+        Long proposalId) {
 
     /** ② 커맨드 검증: (SKU, 로트)별 합계 0, 조정 사유 코드 필수. */
     public void validate() {

@@ -68,7 +68,7 @@ public class PostingService {
         List<ResolvedLine> entries = request.lines().stream().map(lineResolver::resolve).toList();
         PostingCommand cmd = new PostingCommand(request.idemKey(), request.txnType(), request.actorType(),
                 request.actorId(), entries, request.sourceType(), request.sourceRef(), request.reasonCode(),
-                request.reversesTxnId(), request.occurredAt(), request.consumeAllocationIds());
+                request.reversesTxnId(), request.occurredAt(), request.consumeAllocationIds(), request.proposalId());
         cmd.validate();
 
         // ③ 잠금: location FOR SHARE → stock_balance FOR UPDATE, 둘 다 id 오름차순

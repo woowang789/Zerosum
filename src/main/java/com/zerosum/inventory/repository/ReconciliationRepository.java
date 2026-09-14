@@ -2,6 +2,9 @@ package com.zerosum.inventory.repository;
 
 import com.zerosum.inventory.domain.IssueException;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -164,26 +167,43 @@ public class ReconciliationRepository {
      * @return 실제로 새 행을 만들었으면 true, 이미 열린 이슈가 있어 건너뛰었으면 false
      */
     public boolean recordIssueIfAbsent(String issueType, String severity, Long locationId, Long skuId, Long lotId,
-            String detailJson) {
-        int inserted = jdbc.sql("""
+            Map<String, Long> detail) {
+        List<String> keys = List.copyOf(detail.keySet());
+        List<Long> values = keys.stream().map(detail::get).toList();
+        int n = keys.size();
+        // detail JSON은 Java에서 문자열로 조립하지 않는다 — 키·값을 각각 실제 바인드 파라미터
+        // (:k0/:v0, :k1/:v1, ...)로 넘기고 jsonb_object_agg가 SQL에서 조립한다(4단계 작업 지시).
+        // pairs는 플레이스홀더 "이름"만 만들 뿐이고, Map의 키 문자열·값은 문자열 연결로 SQL에 들어가지
+        // 않는다. to_jsonb(BIGINT)로 값을 숫자로 남긴다 — null이면 to_jsonb(NULL::bigint)가 JSON
+        // null이 된다(flaggedSessionId 등).
+        // VALUES(...)는 행이 0개면 SQL 자체가 깨진다. ReconciliationService의 호출부 5곳은 전부
+        // detail에 1개 이상의 키를 채워 부른다(최소가 recordVirtualLocationBalances의 balanceId 1개) —
+        // 그래서 빈 Map을 방어하는 코드는 두지 않는다.
+        String pairs = IntStream.range(0, n)
+                .mapToObj(i -> "(:k%d, CAST(:v%d AS BIGINT))".formatted(i, i))
+                .collect(Collectors.joining(", "));
+        JdbcClient.StatementSpec query = jdbc.sql("""
                 INSERT INTO inventory_issue (issue_type, severity, location_id, sku_id, lot_id, detail)
                 SELECT :issueType, :severity, CAST(:locationId AS BIGINT), CAST(:skuId AS BIGINT),
-                       CAST(:lotId AS BIGINT), CAST(:detail AS JSONB)
+                       CAST(:lotId AS BIGINT),
+                       (SELECT COALESCE(jsonb_object_agg(k, to_jsonb(v)), '{}'::JSONB)
+                        FROM (VALUES %s) AS t(k, v))
                 WHERE NOT EXISTS (
                   SELECT 1 FROM inventory_issue
                   WHERE issue_type = :issueType AND status IN ('OPEN', 'ACKED')
                     AND location_id IS NOT DISTINCT FROM CAST(:locationId AS BIGINT)
                     AND sku_id IS NOT DISTINCT FROM CAST(:skuId AS BIGINT)
                     AND lot_id IS NOT DISTINCT FROM CAST(:lotId AS BIGINT))
-                """)
+                """.formatted(pairs))
                 .param("issueType", issueType)
                 .param("severity", severity)
                 .param("locationId", locationId)
                 .param("skuId", skuId)
-                .param("lotId", lotId)
-                .param("detail", detailJson)
-                .update();
-        return inserted > 0;
+                .param("lotId", lotId);
+        for (int i = 0; i < n; i++) {
+            query = query.param("k" + i, keys.get(i)).param("v" + i, values.get(i));
+        }
+        return query.update() > 0;
     }
 
     // ── 이슈 처리 (사람이 인지·종결한다 — 배치는 기록만 하고 닫지 않는다) ────────────────

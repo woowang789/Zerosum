@@ -20,13 +20,22 @@ public record PostingRequest(
         String reasonCode,
         Long reversesTxnId,
         Instant occurredAt,
-        List<Long> consumeAllocationIds) {
+        List<Long> consumeAllocationIds,
+        Long proposalId) {
 
-    /** 1단계 호출부(할당 소진이 없는 거래) 호환용. consumeAllocationIds는 빈 리스트로 채운다. */
+    /** 2단계 호출부(제안과 무관한 거래) 호환용. proposalId는 널로 채운다. */
+    public PostingRequest(String idemKey, String txnType, String actorType, String actorId,
+            List<PostingLineInput> lines, String sourceType, String sourceRef, String reasonCode,
+            Long reversesTxnId, Instant occurredAt, List<Long> consumeAllocationIds) {
+        this(idemKey, txnType, actorType, actorId, lines, sourceType, sourceRef, reasonCode, reversesTxnId,
+                occurredAt, consumeAllocationIds, null);
+    }
+
+    /** 1단계 호출부(할당 소진이 없는 거래) 호환용. consumeAllocationIds는 빈 리스트, proposalId는 널로 채운다. */
     public PostingRequest(String idemKey, String txnType, String actorType, String actorId,
             List<PostingLineInput> lines, String sourceType, String sourceRef, String reasonCode,
             Long reversesTxnId, Instant occurredAt) {
         this(idemKey, txnType, actorType, actorId, lines, sourceType, sourceRef, reasonCode, reversesTxnId,
-                occurredAt, List.of());
+                occurredAt, List.of(), null);
     }
 }
