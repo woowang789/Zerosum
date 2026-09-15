@@ -4,7 +4,9 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-do
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { LoginForm } from './auth/LoginForm'
 import { IssuesScreen } from './screens/IssuesScreen'
+import { LedgerScreen } from './screens/LedgerScreen'
 import { ProposalsScreen } from './screens/ProposalsScreen'
+import { ReceiptScreen } from './screens/ReceiptScreen'
 import { StockScreen } from './screens/StockScreen'
 
 const queryClient = new QueryClient()
@@ -46,6 +48,8 @@ function Shell() {
         <main className="app-main">
           <Routes>
             <Route path="/stock" element={<StockScreen />} />
+            <Route path="/ledger" element={<LedgerScreen />} />
+            <Route path="/receipts" element={<ReceiptScreen />} />
             <Route path="/proposals" element={<ProposalsScreen />} />
             <Route path="/issues" element={<IssuesScreen />} />
             <Route path="*" element={<Navigate to="/stock" replace />} />
@@ -62,9 +66,20 @@ function Sidebar({ username }: { username: string }) {
     <nav className="sidebar">
       <div className="sidebar-brand">Zerosum</div>
       <ul className="sidebar-nav">
+        <li className="sidebar-nav-label">재고</li>
         <li>
           <NavItem to="/stock" icon={<BoxIcon />} label="재고 현황" />
         </li>
+        <li>
+          <NavItem to="/ledger" icon={<LedgerIcon />} label="원장 조회" />
+        </li>
+
+        <li className="sidebar-nav-label">입출고</li>
+        <li>
+          <NavItem to="/receipts" icon={<ReceiptIcon />} label="입고" />
+        </li>
+
+        <li className="sidebar-nav-label">운영</li>
         <li>
           <NavItem to="/proposals" icon={<ClipboardIcon />} label="제안 승인" />
         </li>
@@ -110,6 +125,47 @@ function BoxIcon() {
       <path d="M21 8l-9-5-9 5 9 5 9-5z" />
       <path d="M3 8v8l9 5 9-5V8" />
       <path d="M12 13v8" />
+    </svg>
+  )
+}
+
+function LedgerIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 6h13" />
+      <path d="M8 12h13" />
+      <path d="M8 18h13" />
+      <path d="M3 6h.01" />
+      <path d="M3 12h.01" />
+      <path d="M3 18h.01" />
+    </svg>
+  )
+}
+
+function ReceiptIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
     </svg>
   )
 }

@@ -599,3 +599,96 @@ select {
   color: var(--text);
   resize: vertical;
 }
+
+/* ── 좌측 내비 섹션 라벨 ────────────────────────────────────────────── */
+
+.sidebar-nav-label {
+  padding: 14px 20px 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.sidebar-nav-label:first-child {
+  padding-top: 0;
+}
+
+/* ── 입고 화면 ──────────────────────────────────────────────────────── */
+
+.receipt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 560px;
+}
+
+.receipt-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.receipt-preview {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 20px;
+}
+
+.receipt-preview h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.receipt-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.receipt-preview-row:first-child {
+  border-top: none;
+}
+
+.receipt-preview-total {
+  font-weight: 600;
+}
+
+.receipt-preview-qty {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.qty-negative {
+  color: var(--danger);
+}
+
+.qty-positive {
+  color: var(--success);
+}
+
+.idem-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 10px 0 0;
+}
+
+/* ── 원장 조회 화면 ─────────────────────────────────────────────────── */
+
+.badge-virtual {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text-secondary) 30%, transparent);
+}
+
+.ledger-proposal-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
