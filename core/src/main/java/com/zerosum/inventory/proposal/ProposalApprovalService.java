@@ -5,6 +5,7 @@ import com.zerosum.inventory.domain.Posted;
 import com.zerosum.inventory.domain.PreconditionFailed;
 import com.zerosum.inventory.domain.WarehouseSkuObservation;
 import com.zerosum.inventory.posting.PostingLineInput;
+import com.zerosum.inventory.reconciliation.ReconciliationService;
 import com.zerosum.inventory.repository.ProposalRepository;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,13 +25,19 @@ public class ProposalApprovalService {
 
     private final ProposalRepository proposalRepo;
     private final ProposalCommandExecutor executor;
+    // reconciliation → repository만 있고 proposal을 모르므로(ReconciliationService는 ReconciliationRepository만
+    // 의존한다) 여기서 proposal → reconciliation을 더해도 순환이 생기지 않는다 — 이슈 종결(할 일 5)은
+    // 그 확인 위에서 이 서비스가 직접 부른다.
+    private final ReconciliationService reconciliationService;
     private final double tolerancePct;
 
     public ProposalApprovalService(ProposalRepository proposalRepo, ProposalCommandExecutor executor,
+            ReconciliationService reconciliationService,
             // 허용 오차는 기본값을 두지 않는다 — zerosum.count.tolerance와 같은 규칙으로 운영 설정에서만 온다.
             @Value("${zerosum.proposal.basis.tolerance-pct}") double tolerancePct) {
         this.proposalRepo = proposalRepo;
         this.executor = executor;
+        this.reconciliationService = reconciliationService;
         this.tolerancePct = tolerancePct;
     }
 
@@ -75,6 +82,16 @@ public class ProposalApprovalService {
         return switch (outcome) {
             case Posted posted -> {
                 proposalRepo.markExecuted(proposal.id(), approver, posted.txnId());
+                // 이슈에서 나온 제안(issueId가 있음)이면 그 실행 거래 id로 이슈를 종결한다 —
+                // ReconciliationService#resolve javadoc이 적어둔 합의된 흐름의 마지막 고리(할 일 5).
+                // 단, 여기서 이슈 종결은 이 트랜잭션의 목적이 아니라 부수 효과다: issueId는 AI가 쓴 값이라
+                // 승인 시점에는 이미 다른 경로로 닫혀 있을 수 있고, 그렇다고 재고 정정(포스팅·markExecuted)
+                // 까지 롤백시키면 안 된다. 그래서 예외를 던지는 resolve() 대신 조용히 넘어가는
+                // resolveIfOpen()을 쓴다 — 사람이 직접 부르는 resolve()의 동작은 바뀌지 않는다.
+                if (proposal.issueId() != null) {
+                    reconciliationService.resolveIfOpen(proposal.issueId(), approver, posted.txnId(),
+                            "proposal:" + proposal.id());
+                }
                 yield new Executed(proposal.id(), posted.txnId());
             }
             case PreconditionFailed ignored -> {
@@ -82,5 +99,14 @@ public class ProposalApprovalService {
                 yield new Stale(proposal.id());
             }
         };
+    }
+
+    /**
+     * 사람의 거부. 승인처럼 먼저 행을 잠그지 않는다 — markRejected()의 조건부 UPDATE 자체가 대상 행을
+     * 잠그므로(동시 승인과 경합해도 하나만 이긴다) 잠금 단계를 따로 반복할 필요가 없다.
+     */
+    @Transactional
+    public void reject(long proposalId, String rejectedBy, String note) {
+        proposalRepo.markRejected(proposalId, rejectedBy, note);
     }
 }

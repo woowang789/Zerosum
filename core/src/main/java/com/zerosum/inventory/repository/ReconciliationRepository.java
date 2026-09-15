@@ -232,7 +232,29 @@ public class ReconciliationRepository {
      * 원장은 그대로 두는 것도 종결이기 때문이다. 그 경우 resolutionNote에 이유를 남긴다.
      */
     public void resolve(long issueId, String resolvedBy, Long resolvedTxnId, String resolutionNote) {
-        int updated = jdbc.sql("""
+        if (updateResolved(issueId, resolvedBy, resolvedTxnId, resolutionNote) != 1) {
+            throw new IssueException("ISSUE_ALREADY_RESOLVED", "이슈 %d는 이미 RESOLVED 상태다".formatted(issueId));
+        }
+    }
+
+    /**
+     * OPEN·ACKED → RESOLVED, 단 예외를 던지지 않고 영향 행 수 대신 성공 여부만 돌려준다. {@link #resolve}와
+     * SQL은 같지만 "이미 닫혀 있으면 오류"가 아니라 "이미 닫혀 있으면 조용히 넘어간다"가 계약이다.
+     *
+     * <p>제안 승인 경로(ProposalApprovalService)처럼 이슈 종결이 재고 정정의 목적이 아니라 부수 효과일 때
+     * 쓴다 — payload의 issueId는 AI가 쓴 값이라 승인 시점에는 이미 다른 경로로 닫혀 있을 수 있고, 그 사실이
+     * 재고 정정(포스팅·markExecuted)까지 롤백시킬 이유가 되면 안 된다(ProposalIssueLinkRobustnessTest).
+     * 사람이 "종결" 버튼을 눌러 직접 부르는 {@link #resolve}는 이 메서드를 쓰지 않는다 — 그 경로는 이미
+     * 닫힌 이슈에 예외를 던지는 지금 동작을 그대로 유지해야 한다.
+     *
+     * @return 실제로 RESOLVED로 바꿨으면 true, 이미 OPEN·ACKED가 아니어서 건너뛰었으면 false
+     */
+    public boolean resolveIfOpen(long issueId, String resolvedBy, Long resolvedTxnId, String resolutionNote) {
+        return updateResolved(issueId, resolvedBy, resolvedTxnId, resolutionNote) == 1;
+    }
+
+    private int updateResolved(long issueId, String resolvedBy, Long resolvedTxnId, String resolutionNote) {
+        return jdbc.sql("""
                 UPDATE inventory_issue
                 SET status = 'RESOLVED', resolved_by = :resolvedBy, resolved_at = now(),
                     resolved_txn_id = CAST(:resolvedTxnId AS BIGINT), resolution_note = :resolutionNote
@@ -243,8 +265,5 @@ public class ReconciliationRepository {
                 .param("resolutionNote", resolutionNote)
                 .param("id", issueId)
                 .update();
-        if (updated != 1) {
-            throw new IssueException("ISSUE_ALREADY_RESOLVED", "이슈 %d는 이미 RESOLVED 상태다".formatted(issueId));
-        }
     }
 }

@@ -18,6 +18,7 @@ apply migrator  migration/V1__init.sql
 apply migrator  migration/V2__grants_and_views.sql
 apply migrator  migration/V3__issue_columns_and_indexes.sql
 apply migrator  migration/V4__ai_views_and_proposal_index.sql
+apply migrator  migration/V5__proposal_decision_note.sql
 apply app_admin 03-seed.sql
 apply migrator  04-harness.sql
 

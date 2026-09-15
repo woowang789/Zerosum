@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: zerosum-web
+
+  # 사람 쪽 쓰기 경로는 app_rw다. ai_ro·ai_proposer는 AI 표면 전용이라 이 모듈에서 쓰지 않는다 —
+  # 사람 화면이 AI 계정을 빌려 쓰면 감사와 권한이 뒤섞인다.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zerosum
+    username: app_rw
+    password: app_rw
+
+  # 마이그레이션은 배포 경로에서 migrator 계정으로 적용한다. 웹 앱이 스키마를 바꾸지 않는다.
+  flyway:
+    enabled: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+zerosum:
+  count:
+    tolerance:
+      qty: 1
+      pct: 0.05
+  # 이 모듈은 배치를 돌리지 않는다 — 아웃박스 릴레이와 정합 검증은 별도 프로세스의 일이다.
+  outbox:
+    relay:
+      enabled: false
+  reconciliation:
+    enabled: false
+  proposal:
+    ttl-minutes: 60
+    basis:
+      tolerance-pct: 0.10
+  # ProposalGateway가 ProposalCreationService(ai_proposer 커넥션)를 함께 물고 있어서 필요하다.
+  # 웹은 승인·거부만 쓰지만 게이트웨이 하나에 생성까지 묶여 있는 결합이다.
+  ai:
+    read:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_ro
+      password: ai_ro
+    proposer:
+      url: jdbc:postgresql://localhost:5432/zerosum
+      username: ai_proposer
+      password: ai_proposer
+
+  web:
+    users:
+      # {bcrypt} 해시. 평문을 두지 않는다 — 설정 파일은 배포 산출물에 그대로 들어간다.
+      # 아래 셋 다 비밀번호는 "zerosum"이다 (개발용).
+      - username: choi.dw
+        password: "{bcrypt}$2a$10$USfxghgqenLcZL67kRO/HeAEAq9V/EH6Zb8RnDHamSJ/u/qC15Rge"
+        roles: [SUPERVISOR]
+        warehouses: [ICN01, YIT01]
+      - username: park.jh
+        password: "{bcrypt}$2a$10$USfxghgqenLcZL67kRO/HeAEAq9V/EH6Zb8RnDHamSJ/u/qC15Rge"
+        roles: [OPERATOR]
+        warehouses: [ICN01]
+      - username: lee.sm
+        password: "{bcrypt}$2a$10$USfxghgqenLcZL67kRO/HeAEAq9V/EH6Zb8RnDHamSJ/u/qC15Rge"
+        roles: [VIEWER]
+        warehouses: [YIT01]
+
+server:
+  port: 8080

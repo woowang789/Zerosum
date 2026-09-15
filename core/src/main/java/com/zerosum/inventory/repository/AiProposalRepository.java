@@ -155,9 +155,12 @@ public class AiProposalRepository {
      *
      * <p>warehouseCodes는 entries[].wh의 중복 제거 목록이다 — AI 쓰기 표면(create_proposal)의 창고 스코핑
      * 검증(ProposalCreationService)에 쓴다.
+     *
+     * <p>issueId는 payload 최상위 값이다(ProposalRepository#lockForUpdate가 승인 시점에 읽는 것과 같은
+     * 위치) — AI가 잘못 적은 issueId를 승인 시점이 아니라 생성 시점에 걷어내는 데 쓴다.
      */
     public record PayloadValidation(String txnType, String reasonCode, boolean hasEntries,
-            List<String> warehouseCodes) {
+            List<String> warehouseCodes, Long issueId) {
     }
 
     /**
@@ -172,11 +175,27 @@ public class AiProposalRepository {
                            AS has_entries,
                        (SELECT COALESCE(array_agg(DISTINCT e.wh), ARRAY[]::TEXT[])
                           FROM jsonb_to_recordset(COALESCE(CAST(:payload AS JSONB) -> 'entries', '[]'::JSONB))
-                                 AS e(wh TEXT)) AS warehouse_codes
+                                 AS e(wh TEXT)) AS warehouse_codes,
+                       (CAST(:payload AS JSONB) ->> 'issueId')::BIGINT AS issue_id
                 """)
                 .param("payload", payloadJson)
                 .query((rs, rowNum) -> new PayloadValidation(rs.getString("txn_type"), rs.getString("reason_code"),
-                        rs.getBoolean("has_entries"), toStringList(rs.getArray("warehouse_codes"))))
+                        rs.getBoolean("has_entries"), toStringList(rs.getArray("warehouse_codes")),
+                        (Long) rs.getObject("issue_id")))
+                .single();
+    }
+
+    /**
+     * issueId가 가리키는 이슈가 실제로 있고 OPEN·ACKED(봐야 할 이슈) 상태인지 — V4가 ai_proposer에 준
+     * {@code SELECT (id, status) ON inventory_issue} 권한만으로 답한다. 생성 단계 검증
+     * (ProposalCreationService)이 이 메서드로 존재하지 않거나 이미 닫힌 이슈를 가리키는 제안을 미리
+     * 거부한다 — 그 값을 무조건 믿고 승인 시점까지 넘기면, 승인 트랜잭션 안에서 이슈 종결이 실패할 때
+     * 재고 정정 자체가 롤백되는 문제로 이어진다(ProposalIssueLinkRobustnessTest).
+     */
+    public boolean issueOpenOrAcked(long issueId) {
+        return jdbc.sql("SELECT EXISTS(SELECT 1 FROM inventory_issue WHERE id = :id AND status IN ('OPEN', 'ACKED'))")
+                .param("id", issueId)
+                .query(Boolean.class)
                 .single();
     }
 

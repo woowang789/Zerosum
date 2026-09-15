@@ -41,4 +41,9 @@ public class ProposalGateway {
     public ApprovalOutcome approve(long proposalId, String approver) {
         return retryTemplate.invoke(() -> approvalService.approve(proposalId, approver));
     }
+
+    /** 거부도 approve()와 같은 이유로 재시도로 감싼다 — {@link ProposalApprovalService#reject}도 프록시 빈의 public 메서드다. */
+    public void reject(long proposalId, String rejectedBy, String note) {
+        retryTemplate.invoke(() -> approvalService.reject(proposalId, rejectedBy, note));
+    }
 }
