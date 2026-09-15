@@ -49,8 +49,7 @@ class CountStartVersusPostingRaceTest extends AbstractIntegrationTest {
                 });
                 Future<?> count = pool.submit(() -> {
                     go.await();
-                    countSessionGateway.start(new StartCountRequest(
-                            "count:RACE-" + round, "ICN01", "A-01-01-1", "user:lee.sh"));
+                    countSessionGateway.start(new StartCountRequest("ICN01", "A-01-01-1", "user:lee.sh"));
                     return null;
                 });
                 go.countDown();

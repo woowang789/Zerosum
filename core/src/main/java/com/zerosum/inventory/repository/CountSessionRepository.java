@@ -7,8 +7,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@code count_session} 행과 로케이션 실사 표시({@code location.count_session_id}) 접근, 그리고 실사 커맨드
- * 4종(COUNT_START·COUNT_SUBMIT·COUNT_RESOLVE·COUNT_ABANDON)의 멱등 키 선점·재현.
+ * 3종(COUNT_SUBMIT·COUNT_RESOLVE·COUNT_ABANDON)의 멱등 키 선점·재현.
  * db/04-harness.sql의 tst_count_start·tst_count_submit·tst_count_resolve·tst_count_abandon과 대응한다.
+ *
+ * <p>시작만 멱등 기록이 없다. 나머지 셋의 키는 세션 id에서 나오고 세션 id는 재사용되지 않지만, 시작의
+ * 업무 식별자는 (창고, 로케이션)이고 그 로케이션은 몇 번이고 다시 실사된다 — 대상을 키로 삼으면 두 번째
+ * 실사가 첫 번째의 재생이 된다. 시작의 재시도 재현은 {@link #lockLocationForUpdate}가 읽는
+ * {@code location.count_session_id}가 맡는다.
  *
  * <p>멱등 키 처리는 AllocationRepository와 같은 패턴이다 — IdempotencyRepository(posting 패키지)는
  * PostingOutcome 전용이라 이 도메인에는 맞지 않아, 선점(INSERT ... ON CONFLICT DO NOTHING)과 결과 재현을
@@ -46,27 +51,6 @@ public class CountSessionRepository {
                 .param("idemKey", idemKey)
                 .query(String.class)
                 .single();
-    }
-
-    // ── COUNT_START 결과 재현/기록 ───────────────────────────────────────────────────
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public long replayStartedSessionId(String idemKey) {
-        return jdbc.sql("SELECT (result ->> 'sessionId')::BIGINT FROM idempotency_record WHERE idem_key = :idemKey")
-                .param("idemKey", idemKey)
-                .query(Long.class)
-                .single();
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void completeStarted(String idemKey, long sessionId) {
-        jdbc.sql("""
-                UPDATE idempotency_record SET result = jsonb_build_object('sessionId', :sessionId)
-                WHERE idem_key = :idemKey
-                """)
-                .param("sessionId", sessionId)
-                .param("idemKey", idemKey)
-                .update();
     }
 
     // ── COUNT_SUBMIT 결과 재현/기록 ──────────────────────────────────────────────────
@@ -166,8 +150,31 @@ public class CountSessionRepository {
     }
 
     /**
+     * 실사 시작이 로케이션 행을 FOR UPDATE로 잠그고 현재 실사 표시를 읽는다. 진행 중이면 그 세션 id를,
+     * 아니면 널을 돌려준다. 잠금은 두 가지를 동시에 한다 — 같은 로케이션의 동시 시작을 직렬화하고,
+     * 진행 중인 포스팅의 FOR SHARE와 충돌해 그 포스팅이 끝나기를 기다린다(05-count-session.md).
+     * 뒤따르는 {@link #markLocationCounting}의 UPDATE와 같은 강도의 행 잠금이므로 잠금 순서는 달라지지
+     * 않고, 획득 시점만 같은 트랜잭션 안에서 앞당겨진다.
+     *
+     * <p>JPA로 읽은 Location 엔티티가 아니라 이 SELECT의 값을 쓴다 — 표시는 잠금 아래에서 읽어야
+     * 최신이기 때문이다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Long lockLocationForUpdate(long locationId) {
+        // 널이 될 수 있는 값이라 record로 감싸 받는다 (AbstractIntegrationTest#countSessionIdOf와 같은 이유).
+        record Flag(Long countSessionId) {
+        }
+        return jdbc.sql("SELECT count_session_id FROM location WHERE id = :id FOR UPDATE")
+                .param("id", locationId)
+                .query((rs, rowNum) -> new Flag((Long) rs.getObject("count_session_id")))
+                .single()
+                .countSessionId();
+    }
+
+    /**
      * 로케이션에 실사 표시를 건다. {@code WHERE id = :locationId AND count_session_id IS NULL}의 영향 행 수를
-     * 그대로 돌려준다 — 0이면 이미 다른 실사가 진행 중이라는 뜻이고, 판정은 서비스가 한다.
+     * 그대로 돌려준다 — 판정은 서비스가 한다. 시작 경로는 {@link #lockLocationForUpdate}로 표시가 널임을
+     * 확인한 뒤에만 부르므로 1이 아니면 버그다.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public int markLocationCounting(long locationId, long sessionId) {

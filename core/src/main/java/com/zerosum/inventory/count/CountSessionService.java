@@ -75,33 +75,40 @@ public class CountSessionService {
         this.tolPct = tolPct;
     }
 
+    /**
+     * 실사 시작. 이 커맨드만 멱등 기록을 쓰지 않는다 — 멱등 키의 업무 식별자는 (창고, 로케이션)인데
+     * "이 로케이션을 실사한다"는 포스팅(receipt:PO-123:1)과 달리 <b>반복되는 일</b>이라 대상이 곧
+     * 유일한 키가 되지 못한다. 실제로 그랬을 때는 idempotency_record에 해제가 없어(I6) 첫 세션이 닫힌 뒤
+     * 다시 시작해도 닫힌 세션 id가 그대로 재생됐다 — 한 로케이션을 평생 한 번만 실사할 수 있었다.
+     *
+     * <p>재시도의 재생은 상태가 대신한다. "이 로케이션에 열린 실사가 있다"는 이미
+     * {@code location.count_session_id}가 들고 있고, 유일성은 부분 유니크 인덱스
+     * {@code uq_count_session_active}(I10)가 DB에서 강제한다. 멱등 기록은 같은 사실을 한 겹 더 들고
+     * 있었을 뿐이고, 그 중복이 버그였다.
+     *
+     * <p>로케이션 행을 FOR UPDATE로 잠그는 것이 동시 시작을 직렬화한다. 잠금 순서(location →
+     * stock_balance, 04-write-path.md)는 그대로다 — 시작은 stock_balance를 건드리지 않고, 뒤따르는
+     * markLocationCounting의 UPDATE가 어차피 같은 강도로 잠그던 행이라 잠금이 세지지도 않는다.
+     */
     @Transactional
     public long start(StartCountRequest request) {
-        String requestHash = sha256Hex(request.warehouseCode() + "|" + request.locationCode());
-
-        boolean isNew = countSessionRepo.tryClaimIdempotencyKey(request.idemKey(), "COUNT_START", requestHash);
-        if (!isNew) {
-            if (!countSessionRepo.storedRequestHash(request.idemKey()).equals(requestHash)) {
-                throw new IdempotencyConflictException(request.idemKey());
-            }
-            return countSessionRepo.replayStartedSessionId(request.idemKey());
-        }
-
         Location location = locationRepository.findByWarehouse_CodeAndCode(request.warehouseCode(), request.locationCode())
                 .orElseThrow(() -> new CountSessionException("UNKNOWN_CODE",
                         "창고·로케이션 코드 중 해석되지 않은 것이 있다: %s/%s"
                                 .formatted(request.warehouseCode(), request.locationCode())));
 
+        Long openSessionId = countSessionRepo.lockLocationForUpdate(location.getId());
+        if (openSessionId != null) {
+            // 이미 열린 실사가 있다 — 재시도의 재생에 해당하므로 그 세션 id를 그대로 돌려준다.
+            // 표시가 닫힌 세션을 가리키는 상태는 I10 위반이라 정합 검증 배치 ⑤가 잡는다.
+            return openSessionId;
+        }
+
         // 세션 생성과 로케이션 표시를 한 트랜잭션에서 한다 (05-count-session.md 시작)
         long sessionId = countSessionRepo.insertSession(location.getId(), request.startedBy());
         int marked = countSessionRepo.markLocationCounting(location.getId(), sessionId);
-        if (marked != 1) {
-            // 영향 행 수 0 = 이미 다른 실사가 진행 중 → 예외로 롤백, 위 insertSession도 함께 되돌아간다
-            throw new CountSessionException("COUNT_ALREADY_OPEN",
-                    "%s에 이미 진행 중인 실사가 있다".formatted(request.locationCode()));
-        }
-
-        countSessionRepo.completeStarted(request.idemKey(), sessionId);
+        // 표시가 널인 것을 FOR UPDATE 아래에서 확인한 뒤이므로 1이 아니면 버그다 (정정·중단의 판정과 같다)
+        requireExactlyOne(marked, sessionId);
         return sessionId;
     }
 

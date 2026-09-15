@@ -9,7 +9,6 @@ import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * 실사 세션의 기본 생명주기: 시작 → 제출(차이 없음 / 오차 이내 / 오차 초과) → 정정 · 중단.
@@ -25,7 +24,7 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
         putawayTshirts("B-01-01-1", 30);
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-0001", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         assertThat(countSessionIdOf("ICN01", "B-01-01-1")).isEqualTo(sessionId);
 
@@ -41,15 +40,21 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
         assertReconciliationClean();
     }
 
+    /**
+     * 전에는 두 번째 시작이 {@code uq_count_session_active} 위반으로 거절되는 것을 단언했다. 시작이 로케이션을
+     * FOR UPDATE로 잠그고 열린 세션을 그대로 돌려주게 되면서 거절이 아니라 재생이 되지만, 이 테스트가
+     * 지키려던 불변식("로케이션당 진행 중인 실사는 하나")은 그대로다 — 세션이 새로 생기지 않는 것을 본다.
+     */
     @Test
-    void concurrentStartOnSameLocationIsRejected() {
+    void secondStartOnOpenLocationReturnsTheOpenSession() {
         putawayTshirts("B-01-01-1", 30);
-        countSessionGateway.start(new StartCountRequest("count:CC-0002", "ICN01", "B-01-01-1", "user:lee.sh"));
+        long first = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
-        assertThatThrownBy(() -> countSessionGateway.start(
-                new StartCountRequest("count:CC-0003", "ICN01", "B-01-01-1", "user:jo.mk")))
-                .as("부분 유니크 인덱스(uq_count_session_active)가 같은 로케이션의 동시 실사를 막는다")
-                .isInstanceOf(DataIntegrityViolationException.class);
+        long second = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:jo.mk"));
+
+        assertThat(second).as("열린 세션이 그대로 돌아온다").isEqualTo(first);
+        assertThat(activeSessionCount("ICN01", "B-01-01-1")).as("진행 중 세션은 여전히 하나").isEqualTo(1);
+        assertThat(countSessionIdOf("ICN01", "B-01-01-1")).isEqualTo(first);
 
         assertReconciliationClean();
     }
@@ -58,7 +63,7 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
     void submitWithNoVarianceConfirmsImmediatelyWithoutAdjustment() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-0004", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:CC-0004:submit",
                 sessionId, List.of(new CountLineInput("SKU-100001", "DEFAULT", 30)), "user:lee.sh"));
@@ -76,7 +81,7 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
     void withinToleranceVarianceAutoResolvesInSameTransaction() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-0005", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         // 차이 -1: 오차(1개 이하이면서 5% 이하) 이내라 같은 트랜잭션에서 자동 정정된다
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:CC-0005:submit",
@@ -97,7 +102,7 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
     void overToleranceVarianceGoesToReviewThenResolvesOnApproval() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-0006", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         // 차이 -6: 오차를 넘어 REVIEW로 남는다 (1개 이하 AND 5% 이하를 둘 다 벗어남)
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:CC-0006:submit",
@@ -134,7 +139,7 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
     void abandonWithoutResolutionLeavesStockUnchanged() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-0007", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         countSessionGateway.abandon(new AbandonCountRequest("count:CC-0007:abandon", sessionId, "user:lee.sh"));
 
@@ -143,6 +148,19 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
         assertThat(onHandQty("ICN01", "B-01-01-1", "SKU-100001", "DEFAULT")).isEqualTo(30);
 
         assertReconciliationClean();
+    }
+
+    /** 그 로케이션의 진행 중(OPEN·REVIEW) 세션 수 — uq_count_session_active가 강제하는 I10 그대로다. */
+    private int activeSessionCount(String warehouseCode, String locationCode) {
+        return jdbcClient.sql("""
+                SELECT count(*) FROM count_session s
+                JOIN location l ON l.id = s.location_id JOIN warehouse w ON w.id = l.warehouse_id
+                WHERE w.code = :wh AND l.code = :loc AND s.status IN ('OPEN', 'REVIEW')
+                """)
+                .param("wh", warehouseCode)
+                .param("loc", locationCode)
+                .query(Integer.class)
+                .single();
     }
 
     private void putawayTshirts(String locationCode, int qty) {

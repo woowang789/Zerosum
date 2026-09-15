@@ -23,7 +23,7 @@ class CountVarianceIssueLinkTest extends AbstractIntegrationTest {
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", 100)));
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CNT-LINK-0001", "ICN01", "A-02-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "A-02-01-1", "user:lee.sh"));
         // 차이 -20: 오차(1개 이하이면서 5% 이하)를 넘어 REVIEW로 남는다
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:CNT-LINK-0001:submit",
                 sessionId, List.of(new CountLineInput("SKU-300001", "DEFAULT", 80)), "user:lee.sh"));

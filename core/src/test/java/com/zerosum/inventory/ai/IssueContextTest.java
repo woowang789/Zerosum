@@ -90,7 +90,7 @@ class IssueContextTest extends AbstractIntegrationTest {
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", 100)));
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:AICTX-CV-0001", "ICN01", "A-02-01-1", "user:test"));
+                new StartCountRequest("ICN01", "A-02-01-1", "user:test"));
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:AICTX-CV-0001:submit",
                 sessionId, List.of(new CountLineInput("SKU-300001", "DEFAULT", 80)), "user:test"));
         assertThat(outcome).isInstanceOf(ReviewRequired.class);
