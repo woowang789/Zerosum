@@ -61,8 +61,16 @@ jobs:
           import glob, sys, xml.etree.ElementTree as ET
           # 멀티모듈 전환 후 결과가 core/build/... 아래로 내려갔고, 모듈이 더 늘어날 예정이므로
           # 모듈 디렉터리를 고정하지 않고 **로 재귀 탐색한다 (recursive=True 필수).
-          total = sum(int(ET.parse(p).getroot().get('tests', 0))
-                      for p in glob.glob('**/build/test-results/test/*.xml', recursive=True))
+          # tests에서 skipped를 뺀다 — it.skip 한 줄이면 vitest·JUnit 둘 다 exit 0이고 tests 속성은
+          # 그대로라, skip만 남은 스위트도 "실행됨"으로 잡혀 이 가드를 그대로 통과해 버린다.
+          # root.iter('testsuite')로 순회한다 — Java(JUnit)는 <testsuite>가 루트라 자기 자신이 걸리지만,
+          # vitest는 <testsuites>가 루트고 tests는 있어도 skipped는 안쪽 <testsuite> 자식에만 있다.
+          # getroot()로 루트 속성만 보면 vitest 쪽 skipped가 항상 0으로 읽혀 이 가드가 무력화된다(실측).
+          total = 0
+          for p in glob.glob('**/build/test-results/test/*.xml', recursive=True):
+              root = ET.parse(p).getroot()
+              for suite in root.iter('testsuite'):
+                  total += int(suite.get('tests', 0)) - int(suite.get('skipped', 0))
           print(f'실행된 테스트: {total}건')
           sys.exit(0 if total > 0 else '테스트가 한 건도 실행되지 않았다')
           PY
