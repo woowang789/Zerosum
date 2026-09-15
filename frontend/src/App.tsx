@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { ApiError } from './api/client'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { LoginForm } from './auth/LoginForm'
 import { CountScreen } from './screens/CountScreen'
@@ -11,7 +12,27 @@ import { ReceiptScreen } from './screens/ReceiptScreen'
 import { ShipmentScreen } from './screens/ShipmentScreen'
 import { StockScreen } from './screens/StockScreen'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // 기본값은 무조건 3회 재시도다 — 4xx에는 해로울 뿐이다. 서버가 "권한이 없다(403)"나
+      // "없는 리소스다(404)"라고 답한 요청은 그대로 다시 보내도 같은 답이므로, 사용자는 이미
+      // 확정된 오류 문구를 백오프까지 기다린 뒤에야 보게 된다(오류 경로를 보는 테스트도 같은 이유로
+      // 구조적으로 느려진다). 401은 재시도할 자격 증명 자체가 없다 — client.ts가 401을 보면
+      // 자격 증명을 지우고 로그아웃시키므로 두 번째 시도는 인증 헤더 없이 나가는 꼴이다.
+      //
+      // 되풀이해 볼 값어치가 있는 것은 일시적 실패뿐이다: 5xx와, ApiError조차 되지 못한 오류
+      // (네트워크 단절 등 fetch 자체가 거부된 경우). 그것도 한 번까지만 — 사람이 보고 있는 화면이라
+      // 오래 매달리는 것보다 빨리 실패를 보여주고 다시 누르게 하는 편이 낫다.
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError && error.status < 500) {
+          return false
+        }
+        return failureCount < 1
+      },
+    },
+  },
+})
 
 export default function App() {
   return (
