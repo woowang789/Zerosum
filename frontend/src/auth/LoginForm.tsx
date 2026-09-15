@@ -16,8 +16,12 @@ export function LoginForm() {
     try {
       await login(username, password)
     } catch (err) {
-      if (err instanceof ApiError) {
+      // 401만 자격 증명 문제다. 나머지(서버 오류 등)를 같은 문구로 뭉뚱그리면 비밀번호가 맞는
+      // 사용자가 비밀번호를 고치려 들게 된다.
+      if (err instanceof ApiError && err.status === 401) {
         setError('아이디 또는 비밀번호가 올바르지 않다')
+      } else if (err instanceof ApiError) {
+        setError(`로그인에 실패했다 (${err.status})`)
       } else {
         setError('로그인 요청에 실패했다')
       }
