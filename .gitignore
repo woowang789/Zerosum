@@ -10,3 +10,7 @@ build/
 
 # OS
 .DS_Store
+
+# frontend (Vite)
+frontend/node_modules/
+frontend/dist/
