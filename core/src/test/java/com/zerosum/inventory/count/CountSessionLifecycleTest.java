@@ -9,6 +9,7 @@ import com.zerosum.inventory.support.AbstractIntegrationTest;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * 실사 세션의 기본 생명주기: 시작 → 제출(차이 없음 / 오차 이내 / 오차 초과) → 정정 · 중단.
@@ -56,6 +57,49 @@ class CountSessionLifecycleTest extends AbstractIntegrationTest {
         assertThat(activeSessionCount("ICN01", "B-01-01-1")).as("진행 중 세션은 여전히 하나").isEqualTo(1);
         assertThat(countSessionIdOf("ICN01", "B-01-01-1")).isEqualTo(first);
 
+        assertReconciliationClean();
+    }
+
+    /**
+     * 위 테스트는 <b>앱이</b> 두 번째 세션을 만들지 않는다는 것만 본다 — 인덱스를 스키마에서 통째로
+     * 지워도 통과한다. 이 저장소의 전제는 불변식을 DB가 강제한다는 것이므로, 앱을 건너뛰고 원장에
+     * 직접 손을 넣었을 때 무엇이 막는지도 증거로 남아야 한다.
+     *
+     * <p>고치기 전에는 시작을 두 번 불러 {@code DataIntegrityViolationException}을 받는 것으로 이
+     * 인덱스를 증명했다. 이제 시작은 열린 세션을 돌려주므로 그 경로로는 인덱스에 닿지 않는다 —
+     * 앱 방어가 좋아진 만큼 DB 방어의 증거가 사라졌고, 그 자리를 이 테스트가 메운다.
+     */
+    @Test
+    void directInsertOfASecondOpenSessionIsRejectedByTheIndex() {
+        putawayTshirts("B-01-01-1", 30);
+        countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
+
+        assertThatThrownBy(() -> jdbcClient.sql("""
+                INSERT INTO count_session (location_id, status, started_by)
+                SELECT l.id, 'OPEN', 'user:bypass'
+                FROM location l JOIN warehouse w ON w.id = l.warehouse_id
+                WHERE w.code = 'ICN01' AND l.code = 'B-01-01-1'
+                """).update())
+                .as("부분 유니크 인덱스 uq_count_session_active가 두 번째 진행 중 세션을 막는다")
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertReconciliationClean();
+    }
+
+    /**
+     * 그 인덱스는 <b>부분</b>이다 — OPEN·REVIEW만 막고 닫힌 세션은 몇 개든 쌓이게 둔다. 그래야
+     * 같은 로케이션을 여러 번 실사할 수 있다. 부분 조건이 사라지면(전체 유니크가 되면) 재실사가
+     * 다시 불가능해지므로, 막는 것만큼 막지 않는 것도 증거로 남긴다.
+     */
+    @Test
+    void closedSessionsDoNotOccupyTheIndex() {
+        putawayTshirts("B-01-01-1", 30);
+        long first = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
+        countSessionGateway.abandon(new AbandonCountRequest("count:abandon:" + first, first, "user:lee.sh"));
+
+        long second = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:jo.mk"));
+
+        assertThat(second).as("닫힌 세션은 인덱스를 점유하지 않는다").isNotEqualTo(first);
         assertReconciliationClean();
     }
 

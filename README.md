@@ -22,7 +22,7 @@
 
 | 증거 | 수치 |
 |---|---|
-| 테스트 | **290건 PASS** (core 222 / web 49 / 프론트 16 / mcp-server 3), 실패·에러 0 |
+| 테스트 | **294건 PASS** (core 226 / web 49 / 프론트 16 / mcp-server 3), 실패·에러 0 |
 | 스키마 하네스 (PL/pgSQL) | **191건 PASS** |
 | 속성 기반 시퀀스 | **4,400 연산**을 무작위로 섞어 실행, 매 단계 정합 검증 0건 |
 | 테스트 DB | Testcontainers PostgreSQL 16 (H2 아님 — 행 잠금과 지연 제약이 달라 증거가 되지 못한다) |
@@ -166,7 +166,7 @@ Java 21 · Spring Boot 4.1.1 · PostgreSQL 16 · Gradle 9.7.1 · Spring AI 1.1.0
 Docker가 필요하다 (Testcontainers).
 
 ```bash
-./gradlew test          # Java 274건 + 프론트 16건
+./gradlew test          # Java 278건 + 프론트 16건
 bash db/run.sh          # 스키마 하네스 191건
 ./gradlew :web:bootRun  # http://localhost:8080
 ```

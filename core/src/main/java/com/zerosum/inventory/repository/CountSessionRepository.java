@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>멱등 키 처리는 AllocationRepository와 같은 패턴이다 — IdempotencyRepository(posting 패키지)는
  * PostingOutcome 전용이라 이 도메인에는 맞지 않아, 선점(INSERT ... ON CONFLICT DO NOTHING)과 결과 재현을
  * 여기서도 직접 구현한다. 커맨드 종류별로 결과 모양이 달라(세션 id, 상태, 정정 거래 id) 메서드를 나눴다.
- * 여기서는 SQL 실행만 하고, 상태 검증(COUNT_ALREADY_OPEN 등 도메인 규칙)은 CountSessionService가 맡는다.
+ * 여기서는 SQL 실행만 하고, 상태 검증(세션이 OPEN인가 등 도메인 규칙)은 CountSessionService가 맡는다.
  */
 @Repository
 public class CountSessionRepository {
