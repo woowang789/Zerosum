@@ -40,4 +40,7 @@ tasks.withType<Test> {
     // application.yml의 "filesystem:db/migration", AbstractIntegrationTest의 "db/00-roles.sql"이
     // 전부 루트 기준 상대 경로이기 때문이다 (db/는 여러 모듈이 공유하므로 core/가 아니라 루트에 둔다).
     workingDir = rootProject.projectDir
+    // InventorySequencePropertyTest의 시드 재현("-Dzerosum.property.seed=<n>")용. Gradle은 커맨드라인
+    // -D를 테스트를 포크한 JVM에 기본 전달하지 않으므로, 값이 있을 때만 그대로 넘겨준다.
+    System.getProperty("zerosum.property.seed")?.let { systemProperty("zerosum.property.seed", it) }
 }
