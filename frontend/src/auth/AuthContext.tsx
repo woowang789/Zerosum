@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   ApiError,
   apiGet,
@@ -23,10 +24,21 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(() => getCredentials()?.username ?? null)
+  const queryClient = useQueryClient()
+
+  // 캐시 비우기는 인증 상태가 바뀌는 지점(로그인 성공·로그아웃)에서 setUsername과 같은 호출 안에서
+  // 동기적으로 해야 한다. 렌더 후 useEffect에서 하면, 새 사용자로 바뀐 뒤 Shell이 먼저 렌더되어 자식
+  // 화면들이 쿼리를 시작하고 나서야 clear()가 돌아 방금 시작된 쿼리의 구독만 남기고 지워버린다
+  // (해당 쿼리는 영영 pending으로 남는다 — 새로고침해야 정상화됨).
+  function logoutAndClear() {
+    queryClient.clear()
+    clearCredentials()
+    setUsername(null)
+  }
 
   useEffect(() => {
     // 세션 만료·비밀번호 변경 등으로 어느 요청에서든 401이 나면 로그인 화면으로 돌린다.
-    setUnauthorizedHandler(() => setUsername(null))
+    setUnauthorizedHandler(() => logoutAndClear())
     return () => setUnauthorizedHandler(null)
   }, [])
 
@@ -43,14 +55,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           // 403(그 창고 권한 없음) 등은 자격 증명 자체는 맞다는 뜻이니 로그인은 성공으로 본다.
         }
+        // park.jh로 로그인해도 choi.dw의 창고 목록이 보이던 문제 — 이전 사용자의 캐시(특히
+        // staleTime: Infinity인 useMe())가 새 사용자 화면에 남지 않도록 setUsername 직전에 비운다.
+        queryClient.clear()
         setUsername(username)
       },
-      logout() {
-        clearCredentials()
-        setUsername(null)
-      },
+      logout: logoutAndClear,
     }),
-    [username],
+    [username, queryClient],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

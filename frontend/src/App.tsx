@@ -1,12 +1,14 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { LoginForm } from './auth/LoginForm'
+import { CountScreen } from './screens/CountScreen'
 import { IssuesScreen } from './screens/IssuesScreen'
 import { LedgerScreen } from './screens/LedgerScreen'
 import { ProposalsScreen } from './screens/ProposalsScreen'
 import { ReceiptScreen } from './screens/ReceiptScreen'
+import { ShipmentScreen } from './screens/ShipmentScreen'
 import { StockScreen } from './screens/StockScreen'
 
 const queryClient = new QueryClient()
@@ -24,19 +26,9 @@ export default function App() {
 function Shell() {
   const { username } = useAuth()
 
-  // QueryClient는 앱 전체에서 하나만 만들어 계속 쓴다(위의 모듈 상수) — 로그아웃 뒤 같은 탭에서
-  // 다른 사용자로 로그인해도 인스턴스가 안 바뀐다는 뜻이다. useMe()는 staleTime: Infinity라 한 번
-  // 받아오면 다시 불러오지 않으므로, 그냥 두면 이전 사용자의 역할·창고(/api/me)가 새 사용자 화면에
-  // 그대로 남는다(실측 확인 — park.jh로 로그인해도 choi.dw의 창고 목록이 보였다). 로그인한 사용자가
-  // 바뀔 때마다 캐시를 통째로 비워 이 문제를 막는다.
-  const previousUsername = useRef(username)
-  useEffect(() => {
-    if (previousUsername.current !== username) {
-      queryClient.clear()
-      previousUsername.current = username
-    }
-  }, [username])
-
+  // 로그인·로그아웃 시점의 캐시 비우기는 AuthContext(login/logout)가 인증 상태 전환과 같은 호출 안에서
+  // 처리한다 — 여기서 렌더 후에 다시 비우면, 이미 새 사용자로 렌더되어 시작된 쿼리를 구독만 남긴 채
+  // 지워버려 영영 pending으로 남는다.
   if (!username) {
     return <LoginForm />
   }
@@ -50,8 +42,10 @@ function Shell() {
             <Route path="/stock" element={<StockScreen />} />
             <Route path="/ledger" element={<LedgerScreen />} />
             <Route path="/receipts" element={<ReceiptScreen />} />
+            <Route path="/shipments" element={<ShipmentScreen />} />
             <Route path="/proposals" element={<ProposalsScreen />} />
             <Route path="/issues" element={<IssuesScreen />} />
+            <Route path="/counts" element={<CountScreen />} />
             <Route path="*" element={<Navigate to="/stock" replace />} />
           </Routes>
         </main>
@@ -78,6 +72,9 @@ function Sidebar({ username }: { username: string }) {
         <li>
           <NavItem to="/receipts" icon={<ReceiptIcon />} label="입고" />
         </li>
+        <li>
+          <NavItem to="/shipments" icon={<ShipmentIcon />} label="출고" />
+        </li>
 
         <li className="sidebar-nav-label">운영</li>
         <li>
@@ -85,6 +82,9 @@ function Sidebar({ username }: { username: string }) {
         </li>
         <li>
           <NavItem to="/issues" icon={<AlertIcon />} label="정합 이슈" />
+        </li>
+        <li>
+          <NavItem to="/counts" icon={<CountIcon />} label="실사" />
         </li>
       </ul>
       <div className="sidebar-footer">
@@ -166,6 +166,48 @@ function ReceiptIcon() {
       <path d="M12 3v12" />
       <path d="M7 10l5 5 5-5" />
       <path d="M5 21h14" />
+    </svg>
+  )
+}
+
+function ShipmentIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 21V9" />
+      <path d="M7 14l5-5 5 5" />
+      <path d="M5 3h14" />
+    </svg>
+  )
+}
+
+function CountIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="5" width="16" height="16" rx="2" />
+      <path d="M8 10h.01" />
+      <path d="M8 14h.01" />
+      <path d="M8 18h.01" />
+      <path d="M12 10h6" />
+      <path d="M12 14h6" />
+      <path d="M12 18h6" />
     </svg>
   )
 }
