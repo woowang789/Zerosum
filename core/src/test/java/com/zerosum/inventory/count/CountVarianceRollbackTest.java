@@ -32,7 +32,7 @@ class CountVarianceRollbackTest extends AbstractIntegrationTest {
         allocate("A-02-01-1", 15); // 가용 5개만 남는다 (on_hand 20, allocated 15)
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-RB-0001", "ICN01", "A-02-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "A-02-01-1", "user:lee.sh"));
         // 차이 -18: 오차를 넘어 REVIEW로 남는다 — 정정하면 on_hand가 2가 되어 allocated_qty(15)보다 작아진다
         CountSubmitOutcome outcome = countSessionGateway.submit(new SubmitCountRequest("count:CC-RB-0001:submit",
                 sessionId, List.of(new CountLineInput("SKU-300001", "DEFAULT", 2)), "user:lee.sh"));
@@ -70,7 +70,7 @@ class CountVarianceRollbackTest extends AbstractIntegrationTest {
         allocate("A-02-01-1", 100); // 전량 할당 (가용 0)
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-RB-0002", "ICN01", "A-02-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "A-02-01-1", "user:lee.sh"));
 
         // 차이 -1: 오차(1개 이하이면서 5% 이하) 이내라 제출 안에서 바로 정정을 시도하지만, 가용이 0이라 실패한다
         assertThatThrownBy(() -> countSessionGateway.submit(new SubmitCountRequest("count:CC-RB-0002:submit",

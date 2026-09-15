@@ -34,7 +34,7 @@ class SellableStockAndAllocationTest extends AbstractIntegrationTest {
         putawayTshirts("A-01-01-1", 52); // 실사 대상 로케이션
 
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-SELL-0001", "ICN01", "A-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "A-01-01-1", "user:lee.sh"));
 
         SellableStock stock = sellableStockService.find("ICN01", "SKU-100001");
         assertThat(stock.sellableQty()).as("실사 중이 아닌 B-01-01-1의 24개만 판매 가능").isEqualTo(24);

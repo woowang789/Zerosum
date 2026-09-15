@@ -2,7 +2,7 @@
 
 ## 실사 세션
 
-실사는 사람이 몇십 분에 걸쳐 수량을 세는 작업이다. 그 사이 출고가 끼어들면 작업자가 센 수량과 시스템 수량이 서로 다른 순간을 가리키게 되어, 멀쩡한 재고에 가짜 조정이 들어간다. 이를 막기 위해 실사를 `count_session`으로 관리하고, 진행 중인 세션을 `location.count_session_id`에 표시한다. 시작, 제출, 정정, 중단 요청도 모두 [멱등성](04-write-path.md#멱등성)의 멱등 키를 받는다.
+실사는 사람이 몇십 분에 걸쳐 수량을 세는 작업이다. 그 사이 출고가 끼어들면 작업자가 센 수량과 시스템 수량이 서로 다른 순간을 가리키게 되어, 멀쩡한 재고에 가짜 조정이 들어간다. 이를 막기 위해 실사를 `count_session`으로 관리하고, 진행 중인 세션을 `location.count_session_id`에 표시한다. 제출, 정정, 중단 요청은 [멱등성](04-write-path.md#멱등성)의 멱등 키를 받는다. 키는 세션 id에서 파생하고(`count:submit:{세션id}`) 세션 id는 재사용되지 않으므로 그 일은 평생 한 번만 일어난다. 시작만 멱등 키를 받지 않는다 — 아래 "시작" 참고.
 
 | 상태 | 의미 | 로케이션 표시 |
 |---|---|---|
@@ -11,21 +11,30 @@
 | CONFIRMED | 차이가 없었거나 정정 거래까지 끝남 | 해제 |
 | ABANDONED | 정정 없이 중단 (재실사 등) | 해제 |
 
-**시작.** 세션 생성과 로케이션 표시를 한 트랜잭션에서 한다.
+**시작.** 로케이션 행을 잠그고, 이미 열린 실사가 있으면 그 세션을 돌려주고, 없으면 세션 생성과 로케이션 표시를 한 트랜잭션에서 한다.
 
 ```sql
+-- 동시 시작을 직렬화한다. 진행 중인 포스팅의 FOR SHARE가 끝날 때까지 여기서 기다린다
+SELECT count_session_id FROM location WHERE id = :locationId FOR UPDATE;
+-- 널이 아니면 그 세션 id를 그대로 반환하고 끝낸다 (재시도의 재생)
+
 -- 부분 유니크 인덱스가 같은 로케이션의 동시 실사를 막는다
 INSERT INTO count_session (location_id, started_by)
 VALUES (:locationId, :userId)
 RETURNING id;
 
--- 진행 중인 포스팅의 FOR SHARE가 끝날 때까지 기다린 뒤 표시된다. 영향 행 수가 0이면 롤백
 UPDATE location
 SET count_session_id = :sessionId
-WHERE id = :locationId AND count_session_id IS NULL;
+WHERE id = :locationId AND count_session_id IS NULL;   -- 잠금 아래이므로 영향 행 수는 항상 1
 ```
 
-이 UPDATE는 로케이션 행에 배타 잠금을 걸어 포스팅이 쥔 FOR SHARE와 충돌한다. 그래서 진행 중인 포스팅이 끝난 뒤에야 표시되고, 이후 포스팅은 커밋된 표시를 읽고 거절된다. 포스팅이 FOR KEY SHARE가 아니라 FOR SHARE를 쓰는 이유가 여기에 있다. 외래키 검사용인 FOR KEY SHARE는 키가 아닌 컬럼을 바꾸는 UPDATE와 충돌하지 않아서 이 경계를 만들지 못한다.
+**시작에 멱등 키를 쓰지 않는 이유.** 멱등 키는 업무 식별자로 만든다. `receipt:{발주라인}:{입고차수}`가 유일한 것은 그 입고가 평생 한 번 일어나기 때문이다. 그런데 "이 로케이션을 실사한다"는 **반복되는 일**이다. 순환 실사는 정기적으로 돈다. 그래서 `count:start:{창고}:{로케이션}` 같은 키를 쓰면 두 번째 실사가 첫 번째의 재생이 되어, 한 로케이션을 평생 한 번만 실사할 수 있게 된다 — `idempotency_record`에는 해제가 없기 때문이다(I6).
+
+재시도의 재생은 상태가 대신한다. "이 로케이션에 열린 실사가 있다"는 이미 `location.count_session_id`가 들고 있고, 유일성은 부분 유니크 인덱스 `uq_count_session_active`(I10)가 DB에서 강제한다. 위의 `FOR UPDATE`가 그 표시를 잠금 아래에서 읽으므로, 같은 요청이 두 번 들어오든 두 사용자가 동시에 시작하든 둘 다 같은 세션 id를 받는다. 멱등 기록은 같은 사실을 한 겹 더 들고 있었을 뿐이다.
+
+이 `FOR UPDATE`는 로케이션 행에 배타 잠금을 걸어 포스팅이 쥔 FOR SHARE와 충돌한다. 그래서 진행 중인 포스팅이 끝난 뒤에야 표시되고, 이후 포스팅은 커밋된 표시를 읽고 거절된다. 뒤따르는 UPDATE가 어차피 같은 강도로 잠그던 행이므로 잠금 순서(location → stock_balance)는 달라지지 않고, 획득 시점만 같은 트랜잭션 안에서 앞당겨진다.
+
+포스팅이 FOR KEY SHARE가 아니라 FOR SHARE를 쓰는 이유도 이 경계에 있다. 외래키 검사용인 FOR KEY SHARE는 키가 아닌 컬럼을 바꾸는 UPDATE(FOR NO KEY UPDATE 강도)와 충돌하지 않는다. 시작은 위처럼 명시적 `FOR UPDATE`로 잠그니 FOR KEY SHARE와도 충돌하겠지만, 아래 정정·중단이 표시를 지우는 `UPDATE location SET count_session_id = NULL`은 그냥 UPDATE다 — 여기서 FOR KEY SHARE는 경계를 만들지 못한다.
 
 **제출.** 세션 행을 FOR UPDATE로 잠그고 OPEN인지 확인한 뒤, 라인별 실재고를 `system_qty`로 `count_result`에 기록한다. 표시가 커밋된 뒤로는 이 로케이션의 실재고를 바꾸는 포스팅이 모두 거절되므로 이 값은 실사 시작 시점의 값과 같다. 모든 라인의 차이가 허용 오차 이내면 같은 트랜잭션에서 아래 정정 절차로 끝내고, 하나라도 넘으면 세션을 REVIEW로 바꾸고 `inventory_issue`를 만든다. 금액은 범위 밖이므로 허용 오차도 수량 기준으로 정한다.
 

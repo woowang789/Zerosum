@@ -22,9 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
  * {@link com.zerosum.inventory.web.issue.IssueController}·{@link com.zerosum.inventory.web.proposal.ProposalController}와
  * 같은 패턴으로 세션의 창고를 {@link CountSessionLookupRepository}에서 읽어 대조한다.
  *
- * <p>멱등 키는 클라이언트가 보내지 않는다 — 시작은 (창고, 로케이션)에서, 나머지는 이미 서버가 만들어 준
- * 세션 id(업무 식별자)에서 서버가 파생한다. 실사자·제출자·정정자·중단자도 전부 {@link Authentication}에서만
- * 읽는다.
+ * <p>멱등 키는 클라이언트가 보내지 않는다 — 제출·정정·중단은 이미 서버가 만들어 준 세션 id(업무 식별자)에서
+ * 서버가 파생하고, 시작은 아예 멱등 키를 쓰지 않는다(같은 로케이션을 다시 실사하는 것이 정상이라
+ * 대상을 키로 삼을 수 없다). 실사자·제출자·정정자·중단자도 전부 {@link Authentication}에서만 읽는다.
  */
 @RestController
 @RequestMapping("/api/counts")
@@ -43,12 +43,11 @@ public class CountController {
         AccessGuard.requireAnyRole(authentication, "OPERATOR", "SUPERVISOR");
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
 
-        // 업무 식별자(창고, 로케이션)에서 파생 — 로케이션당 진행 중인 실사는 하나뿐이므로(I10) 재시도해도 같은
-        // 세션을 돌려준다.
-        String idemKey = "count:start:%s:%s".formatted(request.warehouseCode(), request.locationCode());
+        // 시작만 멱등 키를 만들지 않는다 — 업무 식별자(창고, 로케이션)는 실사마다 반복되므로 키로 쓰면
+        // 두 번째 실사가 첫 번째의 재생이 된다. 재시도의 재생은 로케이션 표시가 맡는다
+        // (CountSessionService#start).
         long sessionId = countSessionGateway.start(
-                new StartCountRequest(idemKey, request.warehouseCode(), request.locationCode(),
-                        authentication.getName()));
+                new StartCountRequest(request.warehouseCode(), request.locationCode(), authentication.getName()));
         return new StartResponse(sessionId);
     }
 

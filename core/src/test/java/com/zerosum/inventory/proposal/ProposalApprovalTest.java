@@ -93,7 +93,7 @@ class ProposalApprovalTest extends AbstractIntegrationTest {
     @Test
     void moveIntoLocationUnderCountRollsBackAndKeepsPending() {
         receiveColdBrew("A-01-01-2", 100);
-        countSessionGateway.start(new StartCountRequest("count:PROP-01", "ICN01", "B-01-01-1", "user:lee.sh"));
+        countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         String payload = """
                 {"txnType":"MOVE","entries":[

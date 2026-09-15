@@ -10,36 +10,43 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * 실사 커맨드 4종(시작·제출·정정·중단)의 멱등성 — 같은 키는 재현하고, 같은 키에 다른 본문은 409로 거절한다
- * (docs/05-count-session.md: "시작, 제출, 정정, 중단 요청도 모두 멱등성의 멱등 키를 받는다").
- * db/04-harness.sql의 tst_count_*는 이 가운데 시작만 멱등 레코드를 직접 갖고 정정·중단은 내부에서 쓰는
- * tst_post의 멱등 키에 얹혀가는데, 그러면 정정을 이미 끝낸 세션에 같은 키로 재요청하면 COUNT_NOT_SUBMITTED로
- * 실패해버린다. docs의 요구(4종 모두 멱등)를 그대로 satisfy하기 위해 Java 쪽은 정정·중단에도 자체 멱등
- * 레코드를 둔다 — CountSessionService 클래스 주석 참고.
+ * 실사 커맨드의 재시도 안전성 — 제출·정정·중단은 같은 키를 재현하고 같은 키에 다른 본문은 409로 거절한다
+ * (docs/05-count-session.md). db/04-harness.sql의 tst_count_*는 정정·중단이 내부에서 쓰는 tst_post의 멱등
+ * 키에 얹혀가는데, 그러면 정정을 이미 끝낸 세션에 같은 키로 재요청하면 COUNT_NOT_SUBMITTED로 실패해버린다.
+ * 그래서 Java 쪽은 정정·중단에도 자체 멱등 레코드를 둔다 — CountSessionService 클래스 주석 참고.
+ *
+ * <p>시작만 멱등 키가 없다. 시작의 업무 식별자는 (창고, 로케이션)인데 그 로케이션은 몇 번이고 다시
+ * 실사되므로 키로 쓸 수 없다. 재시도의 재생은 {@code location.count_session_id}가 맡는다.
  */
 class CountIdempotencyTest extends AbstractIntegrationTest {
 
     @Autowired
     private CountSessionGateway countSessionGateway;
 
+    /**
+     * 시작은 멱등 기록을 갖지 않는다. 전에는 "같은 키는 재현, 같은 키에 다른 로케이션은 409"를 단언했는데,
+     * 키가 사라졌으니 그 단언을 그대로 옮길 수는 없다. 대신 그 두 단언이 각각 지키려던 것을 지킨다 —
+     * 재현은 "열린 세션이 있으면 그 id를 돌려주고 세션을 새로 만들지 않는다"가 대신하고, 409는 "한
+     * 로케이션의 시작이 다른 로케이션의 세션을 돌려주는 일은 없다"가 대신한다(키를 대상에서 파생하던
+     * 시절 409가 막던 것이 바로 그 혼동이었다).
+     */
     @Test
-    void startReplaysOnSameKeyAndConflictsOnDifferentBody() {
+    void startReplaysOpenSessionPerLocation() {
         putawayTshirts("B-01-01-1", 10);
 
-        long first = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-01", "ICN01", "B-01-01-1", "user:lee.sh"));
-        long replay = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-01", "ICN01", "B-01-01-1", "user:lee.sh"));
+        long first = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
+        long replay = countSessionGateway.start(new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         assertThat(replay).isEqualTo(first);
         assertThat(sessionCount()).as("재현은 세션을 다시 만들지 않는다").isEqualTo(1);
 
-        assertThatThrownBy(() -> countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-01", "ICN01", "A-01-01-1", "user:lee.sh")))
-                .as("같은 키에 다른 로케이션(다른 본문)은 409")
-                .isInstanceOf(IdempotencyConflictException.class);
+        long other = countSessionGateway.start(new StartCountRequest("ICN01", "A-01-01-1", "user:lee.sh"));
+
+        assertThat(other).as("다른 로케이션의 시작은 남의 세션을 재생하지 않는다").isNotEqualTo(first);
+        assertThat(sessionCount()).isEqualTo(2);
 
         countSessionGateway.abandon(new AbandonCountRequest("count:CC-IDEM-01:cleanup", first, "user:lee.sh"));
+        countSessionGateway.abandon(new AbandonCountRequest("count:CC-IDEM-01:cleanup2", other, "user:lee.sh"));
         assertReconciliationClean();
     }
 
@@ -47,7 +54,7 @@ class CountIdempotencyTest extends AbstractIntegrationTest {
     void submitReplaysOnSameKeyAndConflictsOnDifferentBody() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-02", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
 
         CountSubmitOutcome first = countSessionGateway.submit(new SubmitCountRequest("count:CC-IDEM-02:submit",
                 sessionId, List.of(new CountLineInput("SKU-100001", "DEFAULT", 30)), "user:lee.sh"));
@@ -70,7 +77,7 @@ class CountIdempotencyTest extends AbstractIntegrationTest {
     void resolveReplaysOnSameKeyWithoutPostingTwice() {
         putawayTshirts("B-01-01-1", 30);
         long sessionId = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-03", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
         countSessionGateway.submit(new SubmitCountRequest("count:CC-IDEM-03:submit", sessionId,
                 List.of(new CountLineInput("SKU-100001", "DEFAULT", 24)), "user:lee.sh")); // 오차 초과 → REVIEW
 
@@ -90,9 +97,9 @@ class CountIdempotencyTest extends AbstractIntegrationTest {
         putawayTshirts("B-01-01-1", 10);
         putawayTshirts("A-01-01-1", 10);
         long session1 = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-04a", "ICN01", "B-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "B-01-01-1", "user:lee.sh"));
         long session2 = countSessionGateway.start(
-                new StartCountRequest("count:CC-IDEM-04b", "ICN01", "A-01-01-1", "user:lee.sh"));
+                new StartCountRequest("ICN01", "A-01-01-1", "user:lee.sh"));
 
         countSessionGateway.abandon(new AbandonCountRequest("count:CC-IDEM-04:abandon", session1, "user:lee.sh"));
         // 재현: 같은 키로 다시 호출해도 예외 없이 조용히 끝난다
