@@ -357,3 +357,245 @@ select {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
+
+/* ── 제안 승인 / 정합 이슈 화면 ─────────────────────────────────────── */
+
+.row-clickable {
+  cursor: pointer;
+}
+
+.row-clickable:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.row-clickable.is-selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.rationale-cell {
+  max-width: 360px;
+}
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.countdown-warning {
+  color: var(--caution);
+}
+
+.countdown-expired {
+  color: var(--danger);
+}
+
+.detail-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.detail-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.detail-section h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.kv-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.kv-list dt {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.kv-list dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.ai-note {
+  border: 1px dashed color-mix(in srgb, var(--info) 45%, transparent);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--info) 5%, transparent);
+}
+
+.ai-note-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--info);
+  border: 1px solid var(--info);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ai-note-body {
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-meta-body {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.basis-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 10px;
+}
+
+.badge-valid {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.badge-invalid {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.badge-severity-critical,
+.badge-severity-high {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.badge-severity-medium {
+  color: var(--caution);
+  background: color-mix(in srgb, var(--caution) 12%, transparent);
+  border-color: color-mix(in srgb, var(--caution) 30%, transparent);
+}
+
+.badge-severity-low {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+}
+
+.badge-status-open {
+  color: var(--caution);
+  background: color-mix(in srgb, var(--caution) 12%, transparent);
+  border-color: color-mix(in srgb, var(--caution) 30%, transparent);
+}
+
+.badge-status-acked,
+.badge-status-pending {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+}
+
+.badge-status-resolved,
+.badge-status-executed {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.badge-status-rejected,
+.badge-status-stale,
+.badge-status-expired {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.callout {
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+
+.callout-caution {
+  color: var(--caution);
+  background: color-mix(in srgb, var(--caution) 10%, transparent);
+  border-color: color-mix(in srgb, var(--caution) 30%, transparent);
+}
+
+.callout-info {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+}
+
+.ledger-row-highlight td {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.detail-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-danger {
+  background: var(--panel);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.reject-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.reject-form textarea {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--panel);
+  color: var(--text);
+  resize: vertical;
+}

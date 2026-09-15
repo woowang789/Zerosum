@@ -22,6 +22,13 @@ public class IssueRepository {
             Long countSessionId, String detail, String aiAnalysis, Instant detectedAt, Instant ackedAt) {
     }
 
+    /** 상세용 — OpenIssueRow와 같은 모양에 종결 감사 정보(누가·언제·왜 처리했는지)를 더했다. */
+    public record IssueDetailRow(long issueId, String issueType, String severity, String status, Long locationId,
+            String locationCode, String warehouseCode, Long skuId, String skuCode, Long lotId, String lotNo,
+            Long countSessionId, String detail, String aiAnalysis, Instant detectedAt, String ackedBy,
+            Instant ackedAt, String resolvedBy, Instant resolvedAt, String resolutionNote, Long resolvedTxnId) {
+    }
+
     public record LedgerRow(long ledgerEntryId, long txnId, String txnType, String reasonCode, String actorType,
             String actorId, Long proposalId, Instant occurredAt, String locationCode, String skuCode, String lotNo,
             int qtyDelta, Integer onHandAfter) {
@@ -59,13 +66,38 @@ public class IssueRepository {
     }
 
     /**
-     * 이슈 하나 — 창고로 미리 거르지 않는다. {@code AiQueryRepository#issue}와 달리 이 화면(사람)은
-     * 존재 자체를 숨길 이유가 없다: 다른 창고 이슈면 호출자가 창고 검증(AccessGuard)에서 403으로 안다.
+     * 이슈 하나(인지·종결 전용 — 대상이 아직 OPEN·ACKED인지 확인하는 용도) — 창고로 미리 거르지 않는다.
+     * {@code AiQueryRepository#issue}와 달리 이 화면(사람)은 존재 자체를 숨길 이유가 없다: 다른 창고
+     * 이슈면 호출자가 창고 검증(AccessGuard)에서 403으로 안다.
      */
     public Optional<OpenIssueRow> findOpen(long issueId) {
         return jdbc.sql("SELECT " + OPEN_ISSUE_COLUMNS + " FROM v_open_issue WHERE issue_id = :id")
                 .param("id", issueId)
                 .query(IssueRepository::mapOpenIssueRow)
+                .optional();
+    }
+
+    /**
+     * 상세 조회는 v_open_issue가 아니라 inventory_issue를 직접 읽는다 — 목록은 "봐야 할 이슈" 작업
+     * 목록이라 OPEN·ACKED로 좁힌 뷰가 맞지만, 상세는 상태와 무관해야 한다(뷰로 읽으면 종결 직후 404가
+     * 되고 resolved_by 등 감사 기록도 못 본다). 로케이션·SKU·로트 조인은 v_open_issue와 같은 모양을
+     * 그대로 재현한다. 창고로 미리 거르지 않는 이유는 findOpen과 같다.
+     */
+    public Optional<IssueDetailRow> findById(long issueId) {
+        return jdbc.sql("""
+                SELECT i.id AS issue_id, i.issue_type, i.severity, i.status,
+                       i.location_id, loc.code AS location_code, w.code AS warehouse_code,
+                       i.sku_id, s.code AS sku_code, i.lot_id, l.lot_no,
+                       i.count_session_id, i.detail::TEXT AS detail, i.ai_analysis::TEXT AS ai_analysis,
+                       i.detected_at, i.acked_by, i.acked_at,
+                       i.resolved_by, i.resolved_at, i.resolution_note, i.resolved_txn_id
+                FROM inventory_issue i
+                LEFT JOIN location loc ON loc.id = i.location_id   LEFT JOIN warehouse w ON w.id = loc.warehouse_id
+                LEFT JOIN sku        s ON s.id   = i.sku_id        LEFT JOIN lot       l ON l.id = i.lot_id
+                WHERE i.id = :id
+                """)
+                .param("id", issueId)
+                .query(IssueRepository::mapIssueDetailRow)
                 .optional();
     }
 
@@ -116,6 +148,19 @@ public class IssueRepository {
                 (Long) rs.getObject("lot_id"), rs.getString("lot_no"), (Long) rs.getObject("count_session_id"),
                 rs.getString("detail"), rs.getString("ai_analysis"), rs.getTimestamp("detected_at").toInstant(),
                 rs.getTimestamp("acked_at") == null ? null : rs.getTimestamp("acked_at").toInstant());
+    }
+
+    private static IssueDetailRow mapIssueDetailRow(ResultSet rs, int rowNum) throws SQLException {
+        return new IssueDetailRow(rs.getLong("issue_id"), rs.getString("issue_type"), rs.getString("severity"),
+                rs.getString("status"), (Long) rs.getObject("location_id"), rs.getString("location_code"),
+                rs.getString("warehouse_code"), (Long) rs.getObject("sku_id"), rs.getString("sku_code"),
+                (Long) rs.getObject("lot_id"), rs.getString("lot_no"), (Long) rs.getObject("count_session_id"),
+                rs.getString("detail"), rs.getString("ai_analysis"), rs.getTimestamp("detected_at").toInstant(),
+                rs.getString("acked_by"),
+                rs.getTimestamp("acked_at") == null ? null : rs.getTimestamp("acked_at").toInstant(),
+                rs.getString("resolved_by"),
+                rs.getTimestamp("resolved_at") == null ? null : rs.getTimestamp("resolved_at").toInstant(),
+                rs.getString("resolution_note"), (Long) rs.getObject("resolved_txn_id"));
     }
 
     private static LedgerRow mapLedgerRow(ResultSet rs, int rowNum) throws SQLException {

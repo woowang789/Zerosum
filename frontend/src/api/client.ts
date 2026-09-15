@@ -91,3 +91,40 @@ export async function apiGet<T>(path: string): Promise<T> {
 
   return (await res.json()) as T
 }
+
+/** POST 전용 래퍼. 오류 처리는 apiGet과 같다(본문 파싱 방식만 다르다 — POST 응답은 비어 있을 수 있다). */
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (credentials) {
+    headers.Authorization = 'Basic ' + btoa(`${credentials.username}:${credentials.password}`)
+  }
+
+  const res = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  if (res.status === 401) {
+    clearCredentials()
+    onUnauthorized?.()
+    throw new ApiError(401, 'UNAUTHORIZED', '인증에 실패했다')
+  }
+
+  if (!res.ok) {
+    let code = 'UNKNOWN'
+    let message = `요청이 실패했다 (${res.status})`
+    try {
+      const errBody = (await res.json()) as { code?: string; message?: string }
+      if (errBody.code) code = errBody.code
+      if (errBody.message) message = errBody.message
+    } catch {
+      // 본문이 JSON이 아니면 기본 메시지를 쓴다
+    }
+    throw new ApiError(res.status, code, message)
+  }
+
+  // approve는 본문(ApprovalOutcome)이 있지만 reject·ack·resolve는 본문이 없다(void) — 빈 응답은 그대로 둔다.
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
