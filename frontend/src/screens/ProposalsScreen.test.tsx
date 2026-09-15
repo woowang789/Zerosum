@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setCredentials } from '../api/client'
 import { server } from '../test/server'
-import { UNAUTHORIZED, authenticate, meHandler } from '../test/fakeApi'
+import { unauthorized, authenticate, meHandler } from '../test/fakeApi'
 import { ProposalsScreen } from './ProposalsScreen'
 
 /**
@@ -38,7 +38,7 @@ it('제안을 승인하면 목록과 상세가 갱신된다', async () => {
   server.use(
     meHandler,
     http.get('*/api/proposals', ({ request }) => {
-      if (!authenticate(request)) return UNAUTHORIZED
+      if (!authenticate(request)) return unauthorized()
       const warehouse = new URL(request.url).searchParams.get('warehouse')
       // 실제 서버(/api/proposals)는 warehouse가 없으면 400이다 — mock도 그렇게 다뤄야 창고 파라미터가
       // 빠지는 변경을 이 테스트가 놓치지 않는다.
@@ -49,7 +49,7 @@ it('제안을 승인하면 목록과 상세가 갱신된다', async () => {
       return HttpResponse.json(warehouse === WAREHOUSE ? pending : [])
     }),
     http.post('*/api/proposals/:id/approve', ({ request, params }) => {
-      if (!authenticate(request)) return UNAUTHORIZED
+      if (!authenticate(request)) return unauthorized()
       // id가 기대한 제안과 다르면(예: proposalId + 999) 아무것도 바꾸지 않는다 — 실제 서버라면
       // 존재하지 않는 제안이므로 404다.
       if (params.id !== String(PROPOSAL_ID)) {
@@ -59,7 +59,7 @@ it('제안을 승인하면 목록과 상세가 갱신된다', async () => {
       return HttpResponse.json({ proposalId: PROPOSAL_ID, txnId: 77 })
     }),
     http.get('*/api/proposals/:id', ({ request, params }) => {
-      if (!authenticate(request)) return UNAUTHORIZED
+      if (!authenticate(request)) return unauthorized()
       if (params.id !== String(PROPOSAL_ID)) {
         return HttpResponse.json({ code: 'NOT_FOUND', message: '제안을 찾을 수 없다' }, { status: 404 })
       }

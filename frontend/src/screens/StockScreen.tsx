@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet, ApiError } from '../api/client'
+import { useMe } from '../hooks/useMe'
 
 type LocationType = 'STORAGE' | 'RECEIVING' | 'RETURN_HOLD' | 'DAMAGED' | 'TRANSIT'
 
@@ -18,10 +19,6 @@ interface StockRow {
   inCount: boolean
 }
 
-// 로그인한 사용자의 창고 목록을 내려주는 API가 없다(/api/me 같은 것이 없음) — 지금은 알려진 두 창고를
-// 직접 고르게 하고, 권한이 없는 창고를 고르면 403을 그대로 안내한다.
-const WAREHOUSES = ['ICN01', 'YIT01']
-
 const LOCATION_TYPE_LABEL: Record<string, string> = {
   RECEIVING: '입고 대기',
   RETURN_HOLD: '검수 대기',
@@ -30,21 +27,59 @@ const LOCATION_TYPE_LABEL: Record<string, string> = {
 }
 
 export function StockScreen() {
-  const [warehouse, setWarehouse] = useState(WAREHOUSES[0])
+  const { data: me, isError: meFailed } = useMe()
+  const [warehouse, setWarehouse] = useState<string | null>(null)
   const [skuInput, setSkuInput] = useState('')
   const [sku, setSku] = useState('')
+
+  useEffect(() => {
+    if (!warehouse && me && me.warehouses.length > 0) {
+      setWarehouse(me.warehouses[0])
+    }
+  }, [me, warehouse])
 
   const { data, error, isLoading } = useQuery({
     queryKey: ['stock', warehouse, sku],
     queryFn: () =>
       apiGet<StockRow[]>(
-        `/api/stock?warehouse=${encodeURIComponent(warehouse)}${sku ? `&sku=${encodeURIComponent(sku)}` : ''}`,
+        `/api/stock?warehouse=${encodeURIComponent(warehouse ?? '')}${sku ? `&sku=${encodeURIComponent(sku)}` : ''}`,
       ),
+    enabled: warehouse != null,
   })
 
   function handleSearch(e: FormEvent) {
     e.preventDefault()
     setSku(skuInput.trim())
+  }
+
+  // me가 아직 없으면 창고를 고를 수 없고, 창고가 없으면 재고 쿼리도 시작되지 않는다(enabled).
+  // 그 상태로 본문을 그리면 빈 드롭다운만 있는 화면이 되는데 — isLoading은 쿼리가 꺼져 있어
+  // false다 — 재고 화면은 로그인 직후 첫 착지 화면이라 그 침묵이 곧 "앱이 고장났다"로 읽힌다.
+  // 다른 화면들(ReceiptScreen 등)과 같은 모양으로 게이트하되, 오류는 침묵시키지 않는다.
+  if (!me) {
+    return (
+      <div className="screen">
+        <header className="screen-header">
+          <h1>재고 현황</h1>
+        </header>
+        {meFailed ? (
+          <p className="state-message state-error">사용자 정보를 불러오지 못했다. 새로고침해 달라.</p>
+        ) : (
+          <p className="state-message">불러오는 중…</p>
+        )}
+      </div>
+    )
+  }
+
+  if (me.warehouses.length === 0) {
+    return (
+      <div className="screen">
+        <header className="screen-header">
+          <h1>재고 현황</h1>
+        </header>
+        <p className="state-message">접근할 수 있는 창고가 없다. 관리자에게 권한을 요청해 달라.</p>
+      </div>
+    )
   }
 
   return (
@@ -56,8 +91,8 @@ export function StockScreen() {
       <form className="stock-filters" onSubmit={handleSearch}>
         <label className="field field-inline">
           <span className="field-label">창고</span>
-          <select value={warehouse} onChange={(e) => setWarehouse(e.target.value)}>
-            {WAREHOUSES.map((code) => (
+          <select value={warehouse ?? ''} onChange={(e) => setWarehouse(e.target.value)}>
+            {me.warehouses.map((code) => (
               <option key={code} value={code}>
                 {code}
               </option>
@@ -80,7 +115,7 @@ export function StockScreen() {
 
       {isLoading && <p className="state-message">불러오는 중…</p>}
 
-      {error && <StockError error={error} warehouse={warehouse} />}
+      {error && warehouse != null && <StockError error={error} warehouse={warehouse} />}
 
       {/* react-query는 새 조회가 실패해도 이전 결과를 data에 남겨둔다 — 다른 창고(다른 권한 범위)의
           재고가 오류 메시지와 함께 그대로 보이면 안 되므로 오류가 있는 동안은 표를 그리지 않는다. */}

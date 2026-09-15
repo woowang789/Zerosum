@@ -58,6 +58,11 @@ public class SecurityConfig implements WebMvcConfigurer {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
+                // 자격 증명 문자셋은 건드리지 않는다 — Spring Security의 기본값이 이미 UTF-8이다.
+                // RFC 7617에서 user-pass는 문자열이 아니라 옥텟 열이고 그 인코딩은 규격이 정하지 않는다.
+                // 서버가 정해 401의 charset 파라미터로 알리며, 그 값으로 허용된 것은 UTF-8뿐이다. 즉
+                // 여기서 UTF-8로 읽는 것이 곧 프론트가 UTF-8로 보내도 되는 근거다(BasicAuthCharsetTest가
+                // 실측으로 고정한다) — 이 기본값을 바꾸면 한글 비밀번호 사용자가 조용히 401이 된다.
                 .httpBasic(basic -> basic.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .build();
     }

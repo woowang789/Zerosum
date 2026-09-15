@@ -5,7 +5,7 @@ import { http } from 'msw'
 import App from '../App'
 import { getCredentials } from '../api/client'
 import { server } from '../test/server'
-import { UNAUTHORIZED, meHandler, stockHandler } from '../test/fakeApi'
+import { unauthorized, meHandler, stockHandler } from '../test/fakeApi'
 import { submitLogin } from '../test/ui'
 
 /**
@@ -82,11 +82,13 @@ describe('인증 상태 전이와 캐시', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await submitLogin(user, 'park.jh')
+    // 창고를 바꿔 다음 요청을 일으키는 방식이라, 창고가 둘인 사용자여야 한다. 재고 화면이 창고 목록을
+    // 하드코딩하던 동안에는 park.jh(ICN01뿐)로도 YIT01을 고를 수 있었다 — 그 선택지 자체가 결함이었다.
+    await submitLogin(user, 'choi.dw') // SUPERVISOR · ICN01·YIT01
     expect(await screen.findByText('ICN01-A-01')).toBeInTheDocument()
 
     // 여기서부터 세션이 만료됐다고 본다.
-    server.use(http.get('*/api/stock', () => UNAUTHORIZED))
+    server.use(http.get('*/api/stock', () => unauthorized()))
     await user.selectOptions(screen.getByLabelText('창고'), 'YIT01')
 
     expect(await screen.findByRole('button', { name: '로그인' })).toBeInTheDocument()

@@ -59,14 +59,48 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler
 }
 
-/** GET 전용 래퍼. 이번 단계는 재고 조회 하나뿐이라 GET만 있으면 된다. */
-export async function apiGet<T>(path: string): Promise<T> {
-  const headers: Record<string, string> = {}
+/**
+ * Authorization: Basic 헤더 값을 만든다.
+ *
+ * <p>btoa에 문자열을 그대로 넘기면 안 된다 — btoa는 인자를 "각 문자가 한 바이트"인 이진 문자열로 보므로
+ * Latin-1(코드포인트 0–255) 밖의 문자를 만나면 InvalidCharacterError를 던진다. 한글 비밀번호면 요청이
+ * 아예 나가지 않고, 그 예외는 ApiError가 아니라 DOMException이라 LoginForm의 마지막 else로 빠져
+ * "로그인 요청에 실패했다"가 뜬다 — 비밀번호 문제인데 서버 장애처럼 보인다.
+ *
+ * <p>RFC 7617에서 user-pass는 문자열이 아니라 옥텟 열이고, 그 옥텟을 만드는 인코딩은 규격이 정하지
+ * 않는다 — 서버가 정하고 401의 charset 파라미터로 알릴 수 있으며 그 값으로 허용된 것은 UTF-8뿐이다.
+ * 그래서 UTF-8로 보내는 것은 서버가 UTF-8로 읽을 때만 맞다: 이 서버가 그렇다는 것은 추측이 아니라
+ * 실측이다(web/.../BasicAuthCharsetTest). TextEncoder로 UTF-8 바이트를 만든 뒤 base64한다.
+ */
+function basicAuthHeader(creds: Credentials): string {
+  const bytes = new TextEncoder().encode(`${creds.username}:${creds.password}`)
+  // 바이트 하나당 문자 하나인 이진 문자열로 바꿔 btoa에 넘긴다. 전개 연산자(String.fromCharCode(...bytes))는
+  // 긴 입력에서 인자 개수 한계에 걸리므로 쓰지 않는다.
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return 'Basic ' + btoa(binary)
+}
+
+/**
+ * 세 래퍼의 공통부 — 자격 증명 붙이기, 401 처리, 실패 응답을 ApiError로 바꾸기.
+ *
+ * <p>응답 본문은 여기서 읽지 않고 Response를 그대로 돌려준다. 성공 응답의 파싱 방식은 메서드마다
+ * 다르고(GET은 항상 JSON, POST·DELETE는 빈 본문이 정상), 그 차이를 여기서 하나로 합치면 각 래퍼의
+ * 계약이 실제보다 넓어진다.
+ */
+// headers를 RequestInit 안에 담아 받지 않고 따로 받는다. RequestInit['headers']는 Headers나
+// [k,v][] 형태도 허용하는 합 타입이라, 그걸 Record로 캐스팅해 스프레드하면 타입 오류가 나야 할
+// 자리가 조용한 헤더 소실({}가 된다)로 바뀐다 — tsc는 통과시킨다.
+async function request(path: string, init: Omit<RequestInit, 'headers'>,
+    extraHeaders: Record<string, string> = {}): Promise<Response> {
+  const headers: Record<string, string> = { ...extraHeaders }
   if (credentials) {
-    headers.Authorization = 'Basic ' + btoa(`${credentials.username}:${credentials.password}`)
+    headers.Authorization = basicAuthHeader(credentials)
   }
 
-  const res = await fetch(path, { headers })
+  const res = await fetch(path, { ...init, headers })
 
   if (res.status === 401) {
     clearCredentials()
@@ -89,78 +123,37 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new ApiError(res.status, code, message)
   }
 
+  return res
+}
+
+/** GET 전용 래퍼. 조회 응답은 언제나 JSON 본문이 있다. */
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await request(path, {})
   return (await res.json()) as T
 }
 
-/** POST 전용 래퍼. 오류 처리는 apiGet과 같다(본문 파싱 방식만 다르다 — POST 응답은 비어 있을 수 있다). */
+/** POST 전용 래퍼. */
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (credentials) {
-    headers.Authorization = 'Basic ' + btoa(`${credentials.username}:${credentials.password}`)
-  }
-
-  const res = await fetch(path, {
-    method: 'POST',
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-
-  if (res.status === 401) {
-    clearCredentials()
-    onUnauthorized?.()
-    throw new ApiError(401, 'UNAUTHORIZED', '인증에 실패했다')
-  }
-
-  if (!res.ok) {
-    let code = 'UNKNOWN'
-    let message = `요청이 실패했다 (${res.status})`
-    try {
-      const errBody = (await res.json()) as { code?: string; message?: string }
-      if (errBody.code) code = errBody.code
-      if (errBody.message) message = errBody.message
-    } catch {
-      // 본문이 JSON이 아니면 기본 메시지를 쓴다
-    }
-    throw new ApiError(res.status, code, message)
-  }
+  const res = await request(
+    path,
+    { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) },
+    { 'Content-Type': 'application/json' },
+  )
 
   // approve는 본문(ApprovalOutcome)이 있지만 reject·ack·resolve는 본문이 없다(void) — 빈 응답은 그대로 둔다.
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-/** DELETE 전용 래퍼(할당 해제 — AllocationController#release는 본문 있는 DELETE다). 나머지는 apiPost와 같다. */
+/** DELETE 전용 래퍼(할당 해제 — AllocationController#release는 본문 있는 DELETE다). */
 export async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (credentials) {
-    headers.Authorization = 'Basic ' + btoa(`${credentials.username}:${credentials.password}`)
-  }
+  const res = await request(
+    path,
+    { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) },
+    { 'Content-Type': 'application/json' },
+  )
 
-  const res = await fetch(path, {
-    method: 'DELETE',
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-
-  if (res.status === 401) {
-    clearCredentials()
-    onUnauthorized?.()
-    throw new ApiError(401, 'UNAUTHORIZED', '인증에 실패했다')
-  }
-
-  if (!res.ok) {
-    let code = 'UNKNOWN'
-    let message = `요청이 실패했다 (${res.status})`
-    try {
-      const errBody = (await res.json()) as { code?: string; message?: string }
-      if (errBody.code) code = errBody.code
-      if (errBody.message) message = errBody.message
-    } catch {
-      // 본문이 JSON이 아니면 기본 메시지를 쓴다
-    }
-    throw new ApiError(res.status, code, message)
-  }
-
+  // release는 본문이 없다(void) — apiPost와 같은 이유로 빈 응답을 undefined로 돌려준다.
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
 }
