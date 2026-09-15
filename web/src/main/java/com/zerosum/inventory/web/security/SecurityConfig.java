@@ -52,7 +52,12 @@ public class SecurityConfig implements WebMvcConfigurer {
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                // 인증이 필요한 것은 /api/** 뿐이다. 정적 자산(로그인 폼을 담은 index.html, JS, CSS)까지
+                // 막으면 로그인하려면 먼저 로그인해야 하는 닭-달걀이 된다 — 서버가 WWW-Authenticate를
+                // 보내지 않으므로(브라우저 기본 창 대신 프론트엔드가 자기 폼을 그린다) 사용자는 빈 401만 받는다.
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/**").authenticated()
+                        .anyRequest().permitAll())
                 .httpBasic(basic -> basic.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .build();
     }

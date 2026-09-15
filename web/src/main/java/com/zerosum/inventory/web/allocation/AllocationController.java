@@ -44,7 +44,12 @@ public class AllocationController {
         String idemKey = "allocate:%s".formatted(request.orderLineRef());
         AllocationResult result = allocationGateway.allocate(new AllocateRequest(idemKey, request.orderLineRef(),
                 request.warehouseCode(), request.skuCode(), request.qty(), request.allowInCount()));
-        return new AllocateResponse(result.allocationIds().stream().map(AllocationId::value).toList());
+        List<Long> allocationIds = result.allocationIds().stream().map(AllocationId::value).toList();
+        List<AllocationLine> lines = allocationLookupRepo.linesOf(allocationIds).stream()
+                .map(line -> new AllocationLine(line.allocationId(), line.locationCode(), line.skuCode(),
+                        line.lotNo(), line.qty()))
+                .toList();
+        return new AllocateResponse(allocationIds, lines);
     }
 
     @DeleteMapping
@@ -66,7 +71,11 @@ public class AllocationController {
             boolean allowInCount) {
     }
 
-    public record AllocateResponse(List<Long> allocationIds) {
+    public record AllocateResponse(List<Long> allocationIds, List<AllocationLine> lines) {
+    }
+
+    /** 이 할당이 예약한 잔액 행(FEFO가 고른 로케이션·로트). 출고 화면이 그대로 줄로 채운다. */
+    public record AllocationLine(long allocationId, String locationCode, String skuCode, String lotNo, int qty) {
     }
 
     public record ReleaseRequestBody(List<Long> allocationIds) {

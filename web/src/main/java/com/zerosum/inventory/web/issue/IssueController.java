@@ -41,7 +41,8 @@ public class IssueController {
     /** 상세 + 원인 분석 컨텍스트(같은 파티션의 원장·실사 이력). */
     @GetMapping("/{id}")
     public IssueDetailResponse detail(@PathVariable long id, Authentication authentication) {
-        IssueRepository.OpenIssueRow issue = requireIssue(id);
+        IssueRepository.IssueDetailRow issue = issueRepo.findById(id)
+                .orElseThrow(() -> new IssueException("ISSUE_NOT_FOUND", "이슈 %d를 찾을 수 없다".formatted(id)));
         AccessGuard.requireWarehouse(authentication, issue.warehouseCode());
         List<IssueRepository.LedgerRow> ledger = issueRepo.ledgerFor(issue.locationId(), issue.skuId(),
                 issue.lotId());
@@ -71,7 +72,7 @@ public class IssueController {
                 .orElseThrow(() -> new IssueException("ISSUE_NOT_FOUND", "이슈 %d를 찾을 수 없다".formatted(id)));
     }
 
-    public record IssueDetailResponse(IssueRepository.OpenIssueRow issue, List<IssueRepository.LedgerRow> ledger,
+    public record IssueDetailResponse(IssueRepository.IssueDetailRow issue, List<IssueRepository.LedgerRow> ledger,
             List<IssueRepository.CountHistoryRow> countHistory) {
     }
 
