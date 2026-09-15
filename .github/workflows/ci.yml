@@ -33,6 +33,15 @@ jobs:
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # :web의 processResources가 frontend/를 npm으로 빌드해 정적 리소스로 넣는다.
+      # 러너에 node가 없으면 :web 빌드가 통째로 깨진다 — frontend/package-lock.json 기준으로 캐시한다.
+      - name: Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       # Testcontainers가 컨테이너를 띄울 때 이미지 풀을 기다리지 않도록 미리 받아 둔다.
       - name: PostgreSQL 16 이미지 준비
         run: docker pull postgres:16
