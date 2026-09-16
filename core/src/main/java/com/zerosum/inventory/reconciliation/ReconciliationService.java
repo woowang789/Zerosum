@@ -82,6 +82,15 @@ public class ReconciliationService {
         repo.resolveIfOpen(issueId, who, resolvedTxnId, resolutionNote);
     }
 
+    /**
+     * 창고를 함께 대조하는 {@link #resolveIfOpen}. 제안 승인이 쓴다 —
+     * {@link ReconciliationRepository#resolveIfOpenInWarehouse}에 이유를 적었다.
+     */
+    public void resolveIfOpenInWarehouse(long issueId, String warehouseCode, String who, Long resolvedTxnId,
+            String resolutionNote) {
+        repo.resolveIfOpenInWarehouse(issueId, warehouseCode, who, resolvedTxnId, resolutionNote);
+    }
+
     private int recordProjectionMismatches() {
         int created = 0;
         for (ProjectionMismatch m : repo.findProjectionMismatches()) {

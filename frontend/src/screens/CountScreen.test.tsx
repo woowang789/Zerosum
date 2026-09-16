@@ -35,10 +35,9 @@ interface SubmitBody {
   lines: { skuCode: string; lotNo: string; countedQty: number }[]
 }
 
-async function renderCountScreen(): Promise<UserEvent> {
-  // 화면만 떼어 그리므로 AuthProvider를 거치지 않는다 — 자격 증명은 직접 심는다. 정정 승인은
-  // SUPERVISOR만 할 수 있으므로 application.yml 기준 SUPERVISOR인 choi.dw로 로그인한다.
-  setCredentials({ username: 'choi.dw', password: 'zerosum' })
+/** 화면만 떼어 그린다 — AuthProvider를 거치지 않으므로 자격 증명은 직접 심는다. 기다리지 않는다. */
+function renderAs(username: string): UserEvent {
+  setCredentials({ username, password: 'zerosum' })
   const user = userEvent.setup()
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -48,6 +47,12 @@ async function renderCountScreen(): Promise<UserEvent> {
       <CountScreen />
     </QueryClientProvider>,
   )
+  return user
+}
+
+async function renderCountScreen(): Promise<UserEvent> {
+  // 정정 승인은 SUPERVISOR만 할 수 있으므로 application.yml 기준 SUPERVISOR인 choi.dw로 로그인한다.
+  const user = renderAs('choi.dw')
   // /api/me가 오기 전에는 "불러오는 중…"뿐이다 — 시작 폼이 그려질 때까지 기다린다.
   await screen.findByRole('button', { name: '실사 세션 시작' })
   return user
@@ -352,4 +357,90 @@ it('실사 줄은 이 세션의 로케이션 재고만으로 만들어진다', a
   expect(submitBodies).toEqual([
     { lines: [{ skuCode: 'SKU-200002', lotNo: 'L20260910-B', countedQty: SYSTEM_QTY }] },
   ])
+})
+
+/**
+ * 새 실사는 <b>자기 세션의</b> 전산 수량으로 시작한다 — 앞 세션의 캐시가 아니라.
+ *
+ * <p>재고 조회 키가 {@code ['count-stock', 창고코드]}였다. 같은 창고에서 새 실사를 시작하면 react-query가
+ * 앞 세션의 응답을 캐시에서 즉시 돌려주고(기본 gcTime 5분), 줄을 만드는 useEffect는 <b>처음 본 데이터</b>로
+ * 한 번만 채우므로 그 낡은 수량이 그대로 굳는다. 뒤늦게 도착하는 새 응답은 {@code lines}가 이미 차 있어
+ * 반영되지 않는다.
+ *
+ * <p>실사 수량은 전산 수량으로 미리 채워지므로 차이 칸은 0으로 그려진다 — 화면에는 단서가 없다. 그래서
+ * 가장 흔한 동작("숫자가 맞다, 그대로 제출")이 곧 <b>거짓 실사</b>가 된다: 서버는 세션 시작 때 자기가
+ * 찍은 {@code system_qty}와 대조하므로 차이가 생기고, 허용 오차 안이면 같은 트랜잭션에서 조정 거래가
+ * 바로 나간다. 원장에 남는 것은 사람이 세지도 않은 수량이다.
+ *
+ * <p>그래서 단언을 화면 표시에서 끝내지 않고 <b>제출 본문</b>까지 본다 — 원장에 무엇이 남는지를 정하는
+ * 것은 그 숫자다. 기존 재시작 테스트는 이걸 잡지 못한다: 가짜 서버가 두 번 다 같은 수량을 주므로
+ * 캐시를 그대로 써도 결과가 같다.
+ */
+it('같은 창고에서 새 실사를 시작하면 전산 수량을 그 세션 기준으로 다시 읽는다', async () => {
+  const FIRST_QTY = 40
+  const SECOND_QTY = 12 // 두 세션 사이에 출고가 나가 재고가 줄어든 상황
+  const submitBodies: SubmitBody[] = []
+  let currentQty = FIRST_QTY
+
+  server.use(
+    meHandler,
+    // 요청 횟수가 아니라 "지금 서버의 재고"로 답한다 — 화면이 배경 재조회를 몇 번 하든 결과가 흔들리지 않는다.
+    http.get('*/api/stock', ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      return HttpResponse.json([
+        {
+          warehouseCode: WAREHOUSE, skuCode: 'SKU-200002', skuName: '콜드브루 원액 1L', lotNo: 'L20260910-B',
+          expiryDate: '2026-09-30', locationCode: LOCATION, locationType: 'STORAGE',
+          onHandQty: currentQty, allocatedQty: 0, availableQty: currentQty, inCount: false,
+        },
+      ])
+    }),
+    startHandler([1, 2], []),
+    http.post('*/api/counts/:id/abandon', ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      return new HttpResponse(null, { status: 204 })
+    }),
+    submitHandler(2, { resolutionTxnId: 903 }, submitBodies),
+  )
+
+  const user = await renderCountScreen()
+  await startSession(user)
+  expect(screen.getByRole('spinbutton')).toHaveValue(FIRST_QTY)
+
+  await user.click(screen.getByRole('button', { name: '실사 포기' }))
+  expect(await screen.findByText(/실사를 포기했다/)).toBeInTheDocument()
+
+  currentQty = SECOND_QTY
+
+  await user.click(screen.getByRole('button', { name: '새 실사 시작' }))
+  await startSession(user)
+
+  // 캐시로 채워졌다면 여기가 40이고, 차이 칸은 그래도 0이라 화면만 보고는 알 수 없다.
+  expect(await screen.findByRole('spinbutton')).toHaveValue(SECOND_QTY)
+
+  // 손대지 않고 그대로 제출한다 — 사람이 "맞다"고 보고 넘기는 바로 그 동작이다.
+  await user.click(screen.getByRole('button', { name: '실사 제출' }))
+  expect(await screen.findByText(/정정 거래 #903/)).toBeInTheDocument()
+  expect(submitBodies).toEqual([
+    { lines: [{ skuCode: 'SKU-200002', lotNo: 'L20260910-B', countedQty: SECOND_QTY }] },
+  ])
+})
+
+/**
+ * 창고 권한이 하나도 없는 사용자에게는 이유를 말한다.
+ *
+ * <p>실사 화면에는 게이트가 "me 로딩 중" 하나뿐이었다. 창고가 0개면 로딩은 끝났으므로 그대로 통과해,
+ * 선택지 0개짜리 드롭다운과 로케이션 입력칸만 남은 시작 폼이 떴다 — 눌러 봐야 서버가 막는다.
+ * 재고·이슈 화면이 먼저 겪고 고친 것과 같은 결함이고, 이제 게이트는 {@code useWarehouseGate} 한 벌이다.
+ *
+ * <p>화면마다 이 단언을 두는 이유는, 공용 게이트가 있다는 것과 <b>이 화면이 그것을 거친다</b>는 것이
+ * 서로 다른 사실이기 때문이다. 다섯 화면이 빠뜨렸던 것이 바로 후자다.
+ */
+it('창고 권한이 없는 사용자에게는 이유를 말한다', async () => {
+  server.use(meHandler)
+
+  renderAs('jung.hs') // 가공 픽스처 — OPERATOR지만 창고 권한이 없다
+
+  expect(await screen.findByText(/접근할 수 있는 창고가 없다/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '실사 세션 시작' })).not.toBeInTheDocument()
 })

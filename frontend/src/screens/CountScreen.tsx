@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { apiGet, apiPost } from '../api/client'
-import { useMe } from '../hooks/useMe'
-import { ApiErrorMessage } from './shared'
+import { ApiErrorMessage, useWarehouseGate } from './shared'
 
 interface StartResponse {
   sessionId: number
@@ -48,19 +47,12 @@ interface Session {
 }
 
 export function CountScreen() {
-  const { data: me } = useMe()
+  const { me, gate } = useWarehouseGate('실사')
   const canWrite = me?.roles.some((r) => r === 'OPERATOR' || r === 'SUPERVISOR') ?? false
   const isSupervisor = me?.roles.includes('SUPERVISOR') ?? false
 
-  if (!me) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1>실사</h1>
-        </header>
-        <p className="state-message">불러오는 중…</p>
-      </div>
-    )
+  if (me === null) {
+    return gate
   }
 
   if (!canWrite) {
@@ -170,8 +162,16 @@ function CountSession({
   const [newSku, setNewSku] = useState('')
   const [newLot, setNewLot] = useState('')
 
+  // 키에 세션 id가 들어간다. 창고 코드만 쓰던 동안에는 같은 창고에서 새 실사를 시작할 때 react-query가
+  // 앞 세션의 응답을 캐시에서 즉시 돌려줬고(기본 gcTime 5분), 아래 useEffect가 그 낡은 수량으로 입력 줄을
+  // 만들어 버렸다 — 뒤늦게 도착하는 새 응답은 lines가 이미 채워져 있어 반영되지 않는다. 화면에는 차이가
+  // 0으로 그려지니 "숫자가 맞다"고 보고 그대로 제출하게 되는데, 서버는 자기 스냅샷(system_qty)과 대조하므로
+  // 차이가 생기고 오차 안이면 같은 트랜잭션에서 조정 거래까지 나간다. 즉 거짓 실사가 원장에 남는다.
+  //
+  // 세션 id는 DB의 IDENTITY라 재사용되지 않으므로, 새 세션은 반드시 캐시가 비어 있는 키가 된다 —
+  // staleTime·gcTime을 건드릴 필요가 없다(있는 데이터를 어떻게 다룰지가 아니라, 애초에 없는 키를 쓴다).
   const stockQuery = useQuery({
-    queryKey: ['count-stock', session.warehouseCode],
+    queryKey: ['count-stock', session.id, session.warehouseCode],
     queryFn: () => apiGet<StockPickRow[]>(`/api/stock?warehouse=${encodeURIComponent(session.warehouseCode)}`),
   })
 

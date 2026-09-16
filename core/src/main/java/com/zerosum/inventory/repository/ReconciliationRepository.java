@@ -253,6 +253,36 @@ public class ReconciliationRepository {
         return updateResolved(issueId, resolvedBy, resolvedTxnId, resolutionNote) == 1;
     }
 
+    /**
+     * 창고를 함께 대조하는 종결. 제안 승인이 쓴다.
+     *
+     * <p>제안의 {@code issueId}는 payload 안에 있고 그것을 쓴 것은 AI다. 생성 단계가 호출자 창고와
+     * 대조하지만 <b>그것만으로는 경계가 아니다</b> — 이미 PENDING인 제안은 그 검사를 지나온 적이 없고,
+     * {@code ai_proposer}는 {@code action_proposal}에 테이블 단위 INSERT 권한이 있어 MCP를 거치지 않고
+     * 직접 넣을 수도 있다(하네스 UC-E12가 그 경로다). 실제 피해는 종결 시점에 나므로 여기서도 본다.
+     *
+     * <p>0행이면 조용히 넘어가는 것은 {@link #resolveIfOpen}과 같다 — 이슈 종결은 승인 트랜잭션의
+     * 목적이 아니라 부수 효과라, 남의 창고 이슈를 가리켰다고 재고 정정까지 롤백시키지는 않는다.
+     */
+    public boolean resolveIfOpenInWarehouse(long issueId, String warehouseCode, String resolvedBy,
+            Long resolvedTxnId, String resolutionNote) {
+        return jdbc.sql("""
+                UPDATE inventory_issue i
+                SET status = 'RESOLVED', resolved_by = :resolvedBy, resolved_at = now(),
+                    resolved_txn_id = CAST(:resolvedTxnId AS BIGINT), resolution_note = :resolutionNote
+                WHERE i.id = :id AND i.status IN ('OPEN', 'ACKED')
+                  AND EXISTS (
+                        SELECT 1 FROM location l JOIN warehouse w ON w.id = l.warehouse_id
+                        WHERE l.id = i.location_id AND w.code = :wh)
+                """)
+                .param("resolvedBy", resolvedBy)
+                .param("resolvedTxnId", resolvedTxnId)
+                .param("resolutionNote", resolutionNote)
+                .param("id", issueId)
+                .param("wh", warehouseCode)
+                .update() == 1;
+    }
+
     private int updateResolved(long issueId, String resolvedBy, Long resolvedTxnId, String resolutionNote) {
         return jdbc.sql("""
                 UPDATE inventory_issue

@@ -79,9 +79,22 @@ public class ProposalCreationService {
         }
         // issueId는 payload 안에 있고 그것을 쓴 것은 AI다 — 값을 무조건 믿고 승인 시점까지 넘기면, 존재하지
         // 않거나 이미 닫힌 이슈를 가리킬 때 승인 트랜잭션 안의 이슈 종결이 문제가 된다. 여기서 미리 거부한다.
-        if (payload.issueId() != null && !repository.issueOpenOrAcked(payload.issueId())) {
+        //
+        // 창고도 같이 본다. 상태만 보던 동안에는 entries를 전부 자기 창고로 두고 최상위 issueId만 남의 창고
+        // 이슈로 적은 제안이 그대로 통과했고, 사람이 승인하는 순간 그 이슈가 RESOLVED가 됐다 — 남의 창고
+        // 불일치는 하나도 고쳐지지 않았는데 담당자의 "봐야 할 이슈"에서 사라진다. 배치가 여는 이슈는 다시
+        // 열리지만 COUNT_VARIANCE는 실사 제출 때 한 번만 생성되므로(CountResultRepository) 되살아날 경로가 없다.
+        //
+        // 코드를 WAREHOUSE_OUT_OF_SCOPE로 가르지 않고 ISSUE_NOT_OPEN_OR_ACKED 하나로 접는다. entries·
+        // basisRefs의 창고는 AI가 스스로 적어 보낸 값이라 거절 사유를 알려줘도 새는 것이 없지만, issueId의
+        // 판정은 남의 창고 데이터에 대한 답이다 — 둘을 구분해 주면 에이전트가 id를 훑어 다른 창고에 어떤
+        // 이슈가 열려 있는지 알아낼 수 있다. 조회 쪽 get_issue_context도 같은 이유로 "다른 창고 이슈"를
+        // "없다"와 같은 예외로 접는다(AiQueryRepository#issue).
+        if (payload.issueId() != null
+                && !repository.issueOpenOrAckedInWarehouse(payload.issueId(), allowedWarehouseCode)) {
             throw new ProposalException("ISSUE_NOT_OPEN_OR_ACKED",
-                    "issueId(%d)가 가리키는 이슈가 없거나 이미 닫혀 있다".formatted(payload.issueId()));
+                    "issueId(%d)가 가리키는 이슈가 이 호출자 권한(%s)의 OPEN·ACKED 이슈가 아니다"
+                            .formatted(payload.issueId(), allowedWarehouseCode));
         }
 
         // 창고 스코핑은 여기(create_proposal, AI 쓰기 표면)에서만 강제한다 — PostingService 같은 일반

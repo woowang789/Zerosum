@@ -8,7 +8,7 @@
 | app_admin | 프라이머리 | 마스터(`warehouse`·`location`·`sku`·`lot`) 읽기·쓰기. 코어 테이블은 조회만 |
 | app_rw | 프라이머리 | 코어 테이블 읽기·쓰기. `inventory_txn`, `inventory_ledger_entry`는 SELECT·INSERT만. 마스터는 조회만 하며 예외는 `location.count_session_id` 한 컬럼뿐이다 |
 | ai_ro | 레플리카 | 조회용 뷰 SELECT만 |
-| ai_proposer | 프라이머리 | 조회 뷰(`v_balance_basis`, `v_warehouse_sku_basis`) SELECT, `action_proposal` 일부 컬럼 SELECT·INSERT, `inventory_issue`는 (id, status) SELECT + (ai_analysis) UPDATE — 아래 단락 참고 |
+| ai_proposer | 프라이머리 | 조회 뷰(`v_balance_basis`, `v_warehouse_sku_basis`, `v_issue_scope`) SELECT, `action_proposal` 일부 컬럼 SELECT·INSERT, `inventory_issue`는 (id, status) SELECT + (ai_analysis) UPDATE — 아래 단락 참고 |
 
 ai_proposer 행은 처음엔 "`action_proposal` INSERT만"으로 적었지만 실측해보니 그대로는 성립하지 않았다. `INSERT ... RETURNING id`는 SELECT 권한을 요구하는데 그 권한이 없으면 42501로 거부돼 새로 만든 제안의 id를 돌려줄 수 없었고, 잔액을 읽을 권한도 없어 `basis_snapshot`을 서버가 직접 채우는 규칙([basis_snapshot](#제안-실행-규칙) 문단)과도 모순됐다. 그래서 V4 마이그레이션은 권한을 컬럼 단위로만 넓혔다 — 조회 뷰 SELECT, `action_proposal`은 `id, proposal_type, command_payload, status, created_at, expires_at` 컬럼만 SELECT(+INSERT), `inventory_issue`는 (id, status) SELECT + (ai_analysis) UPDATE.
 
@@ -36,6 +36,12 @@ GRANT SELECT ON v_available_stock TO ai_ro;
 ```
 
 MCP 서버는 조회 도구로 `get_available_stock`, `get_ledger`(SKU·로케이션·기간), `list_open_issues`, `get_issue_context`(이슈 전후 원장과 실사 이력 묶음)를 제공하고, 쓰기 도구는 `create_proposal`과 `write_issue_analysis` 둘이다 — 불일치 원인 분석까지 AI에게 위임하기로 하면서 후자가 추가됐다. 창고 접근 권한은 LLM에게 맡기지 않고 도구 내부에서 호출자 기준으로 강제한다. 에이전트가 재시도로 같은 제안을 여러 번 넣어도 `uq_proposal_pending` 인덱스 때문에 대기 중인 제안은 하나만 남는다.
+
+AI 쓰기 표면 둘(`create_proposal`의 `payload.issueId`, `write_issue_analysis`의 `issueId`)은 그 이슈가 **호출자 창고의 것인지도** 본다. 이슈는 `location_id`를 통해서만 창고에 매이는데 ai_proposer는 그 컬럼을 읽을 수 없어, V6가 `v_issue_scope`(issue_id, status, warehouse_code) 뷰를 두고 SELECT만 준다.
+
+그 대가는 분명히 해 둔다 — **이 뷰는 전 창고 이슈의 (id → 창고) 대응을 열거 가능하게 한다.** 다만 새로 열린 종류는 아니다: V4의 `GRANT SELECT (id, status) ON inventory_issue`가 이미 전 창고 이슈의 id와 상태를 열거 가능하게 해 뒀고, V6는 거기에 창고 코드를 더한 것이다. 거절 문구를 "이 창고의 열린 이슈가 아니다"로 뭉뚱그리는 것(코드는 `ISSUE_NOT_OPEN_OR_ACKED` 하나)은 그 위에서 조금이라도 덜 알려주려는 선택이지, 뷰가 막는 것은 아니다.
+
+그리고 **생성 단계 대조만으로는 경계가 아니다.** 이미 PENDING인 제안은 그 검사를 지나온 적이 없고, ai_proposer는 `action_proposal`에 테이블 단위 INSERT 권한이 있어 MCP를 거치지 않고 직접 넣을 수도 있다(하네스 UC-E12가 그 경로다). 그래서 승인 시점에도 같은 대조를 한다([쓰기 경로](04-write-path.md) 제안 승인) — 어긋나면 이슈만 건드리지 않고 재고 정정은 그대로 실행한다.
 
 이슈의 상태 전이(`acknowledge`·`resolve`)는 AI에게 위임하지 않는다 — `write_issue_analysis`가 건드릴 수 있는 것은 `ai_analysis` 컬럼 하나뿐이고, `status`·`acked_*`·`resolved_*`는 ai_proposer 계정 자체에 컬럼 권한이 없어 SQL 문법 수준에서부터 막힌다(V4의 컬럼 단위 GRANT). 이 보장의 범위는 정확히 "ai_proposer 커넥션으로는 불가능"이지 "아무도 불가능"이 아니다 — app_rw로 접속하는 사람 쪽 코드(`ReconciliationService`)는 여전히 그 컬럼들을 바꿀 수 있고, 실제로 이슈를 닫는 것도 그쪽이다.
 

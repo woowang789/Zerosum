@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '../api/client'
-import { useMe } from '../hooks/useMe'
-import { ApiErrorMessage, formatDateTime } from './shared'
+import { ApiErrorMessage, formatDateTime, useWarehouseGate } from './shared'
 
 // LedgerQueryRepository.LedgerRow(:web)를 그대로 받는다 — v_ledger 뷰의 모든 컬럼이다.
 interface LedgerRow {
@@ -45,7 +44,7 @@ function buildLedgerUrl(warehouse: string, filters: Filters): string {
 }
 
 export function LedgerScreen() {
-  const { data: me } = useMe()
+  const { me, gate } = useWarehouseGate('원장 조회')
   const [warehouse, setWarehouse] = useState<string | null>(null)
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS)
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS)
@@ -72,6 +71,12 @@ export function LedgerScreen() {
   // 이미 가장 오래된 500건만 준 뒤라 최신 행이 빠질 수 있다 — :web을 고치지 않는 이번 조각에서는
   // 손댈 수 없는 한계다.
   const rows = data ? [...data].reverse() : null
+
+  // 다른 여섯 화면과 같은 게이트. 읽기 전용이라고 예외가 되지 않는다 — 조회 쿼리도
+  // enabled: warehouse != null이라, /api/me가 실패하면 여기도 영원한 빈 화면이 된다.
+  if (me === null) {
+    return gate
+  }
 
   return (
     <div className="screen">

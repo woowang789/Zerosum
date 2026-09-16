@@ -170,9 +170,18 @@ class ProposalReviewTest extends AbstractIntegrationTest {
                 .update();
     }
 
+    /**
+     * 제안이 가리킬 이슈 하나. location_id를 채운다 — 이슈가 창고에 매이는 유일한 길이고
+     * (inventory_issue → location → warehouse), 제안 생성 검증이 그것으로 호출자 창고를 대조하기
+     * 때문이다. 실제로 이슈를 여는 경로도 전부 채운다(ReconciliationService, CountResultRepository).
+     * 이 제안이 고치는 로케이션(A-01-01-1)에 건다.
+     */
     private long insertOpenIssue() {
         return jdbcClient.sql("""
-                INSERT INTO inventory_issue (issue_type, severity, detail) VALUES ('TEST_ISSUE', 'LOW', '{}'::JSONB)
+                INSERT INTO inventory_issue (issue_type, severity, location_id, detail)
+                SELECT 'TEST_ISSUE', 'LOW', l.id, '{}'::JSONB
+                FROM location l JOIN warehouse w ON w.id = l.warehouse_id
+                WHERE w.code = 'ICN01' AND l.code = 'A-01-01-1'
                 RETURNING id
                 """)
                 .query(Long.class)

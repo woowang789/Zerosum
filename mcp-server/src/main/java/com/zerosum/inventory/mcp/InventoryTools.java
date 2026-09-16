@@ -28,10 +28,12 @@ import org.springframework.stereotype.Component;
  * 두 창고에 갖고 있다). 그래서 warehouseCode는 도구 시그니처에 나타나지 않고, 설정
  * ({@code zerosum.mcp.warehouse-code})에서 주입받아 필드로만 들고 있다 — 즉 "MCP 서버 프로세스 하나 =
  * 창고 하나 권한"이다. {@code create_proposal}의 proposedBy(에이전트 식별자)도 같은 이유로 LLM이
- * 정하지 않고 설정({@code zerosum.mcp.proposed-by})에서 온다. {@code create_proposal}도 같은
- * warehouseCode를 {@link ProposalCreationService#create}에 넘겨 commandPayloadJson·basisRefs가
- * 다른 창고를 건드리지 못하게 한다 — 조회 넷과 마찬가지로 코어가 범위를 강제하고 여기는 "나는
- * 누구인가"만 넘긴다.
+ * 정하지 않고 설정({@code zerosum.mcp.proposed-by})에서 온다. 쓰기 도구 둘도 같은
+ * warehouseCode를 넘긴다 — {@code create_proposal}은 {@link ProposalCreationService#create}에,
+ * {@code write_issue_analysis}는 {@link AiAnalysisService#writeIssueAnalysis}에. 조회 넷과 마찬가지로
+ * 코어가 범위를 강제하고 여기는 "나는 누구인가"만 넘긴다. DB 권한은 이 경계를 대신 지켜주지 못한다 —
+ * ai_proposer의 {@code UPDATE (ai_analysis)}도 {@code INSERT ON action_proposal}도 테이블 전체에 걸린
+ * 권한이라 창고를 가리지 않는다.
  */
 @Component
 public class InventoryTools {
@@ -90,11 +92,12 @@ public class InventoryTools {
 
     @Tool(name = "write_issue_analysis",
             description = "이슈의 AI 원인 분석 결과(JSON)를 기록한다. 이슈의 ai_analysis 컬럼만 갱신하며 "
-                    + "status 등 다른 필드는 바꾸지 않는다(DB 권한으로 막혀 있다). OPEN·ACKED 상태의 이슈에만 쓸 수 있다.")
+                    + "status 등 다른 필드는 바꾸지 않는다(DB 권한으로 막혀 있다). OPEN·ACKED 상태의 이슈에만 쓸 수 있고, "
+                    + "issueId는 이 서버가 담당하는 창고의 이슈가 아니면 기록되지 않는다.")
     public void writeIssueAnalysis(
             @ToolParam(description = "분석 결과를 기록할 이슈 id") long issueId,
             @ToolParam(description = "분석 결과 JSON 문자열") String analysisJson) {
-        aiAnalysisService.writeIssueAnalysis(issueId, analysisJson);
+        aiAnalysisService.writeIssueAnalysis(warehouseCode, issueId, analysisJson);
     }
 
     @Tool(name = "create_proposal",

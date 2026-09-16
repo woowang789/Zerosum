@@ -123,6 +123,66 @@ class ProposalCreationValidationTest extends AbstractIntegrationTest {
         assertReconciliationClean();
     }
 
+    /**
+     * entries가 전부 자기 창고여도, payload 최상위 issueId가 남의 창고 이슈를 가리키면 거부해야 한다.
+     *
+     * <p>생성 검증은 issueId에 대해 <b>상태만</b> 봤다(OPEN·ACKED인가). 그래서 ICN01 전용 MCP 서버가
+     * entries를 전부 ICN01로 두고 issueId만 YIT01 이슈로 적으면 그대로 생성됐고, 사람이 승인하는 순간
+     * 그 YIT01 이슈가 RESOLVED가 됐다(승인 경로가 payload의 issueId로 이슈를 닫는다). YIT01의 실제
+     * 불일치는 하나도 고쳐지지 않았는데 담당자의 "봐야 할 이슈"에서 사라진다.
+     *
+     * <p>배치가 여는 이슈(PROJECTION_MISMATCH 등)는 다음 회차에 다시 열리지만,
+     * COUNT_VARIANCE는 실사 제출 때 한 번만 생성되므로(CountResultRepository) 잘못 닫히면 되살아날
+     * 경로가 없다. 그래서 여기서 막지 못하면 복구되지 않는다.
+     *
+     * <p>뒤쪽 절반이 없으면 앞의 거부 단언은 공허하다 — issueId가 붙었다는 이유만으로 거부해도,
+     * 이슈가 애초에 만들어지지 않았어도 똑같이 통과한다. 창고만 바꾼 같은 모양이 통과하는 것까지
+     * 봐야 "창고 때문에 거부했다"가 된다.
+     */
+    @Test
+    void proposalPointingAtAnotherWarehouseIssueIsRejected() {
+        receiveColdBrew(100);
+        long yitIssueId = insertOpenIssue("YIT01");
+        long icnIssueId = insertOpenIssue("ICN01");
+
+        assertThatThrownBy(() -> proposalCreationService.create(issueRequest(yitIssueId), "ICN01"))
+                .as("issueId가 호출자 권한 밖 창고(YIT01)의 이슈를 가리키면 거부해야 한다")
+                .isInstanceOf(ProposalException.class);
+        assertThat(proposalCount()).as("거부됐으므로 제안이 생기지 않는다").isZero();
+
+        assertThat(proposalCreationService.create(issueRequest(icnIssueId), "ICN01"))
+                .as("창고만 바꾼 같은 모양의 제안은 만들어진다 — 위 거부는 창고 때문이다")
+                .isInstanceOf(ProposalCreated.class);
+        assertThat(proposalCount()).isOne();
+        assertReconciliationClean();
+    }
+
+    /** entries는 전부 ICN01인 정상 MOVE인데 최상위 issueId만 인자로 받은 이슈를 가리킨다. */
+    private static CreateProposalRequest issueRequest(long issueId) {
+        String payload = """
+                {"txnType":"MOVE","issueId":%d,"entries":[
+                   {"wh":"ICN01","loc":"A-01-01-2","sku":"SKU-200002","lot":"L20260910-B","qty":-20},
+                   {"wh":"ICN01","loc":"A-01-02-1","sku":"SKU-200002","lot":"L20260910-B","qty":20}]}
+                """.formatted(issueId);
+        return new CreateProposalRequest("MOVE", payload, "이슈 복구", "agent:test", null,
+                List.of(BasisRef.balance("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B")));
+    }
+
+    /** 해당 창고의 A-01-01-2에 OPEN 이슈 하나. 두 창고가 같은 로케이션 코드를 갖는다(db/03-seed.sql). */
+    private long insertOpenIssue(String warehouseCode) {
+        return jdbcClient.sql("""
+                INSERT INTO inventory_issue (issue_type, severity, location_id, sku_id, lot_id, detail)
+                SELECT 'PROJECTION_MISMATCH', 'CRITICAL', l.id, s.id, lo.id, '{}'::JSONB
+                FROM location l, warehouse w, sku s, lot lo
+                WHERE w.code = :wh AND l.warehouse_id = w.id AND l.code = 'A-01-01-2'
+                  AND s.code = 'SKU-200002' AND lo.sku_id = s.id AND lo.lot_no = 'L20260910-B'
+                RETURNING id
+                """)
+                .param("wh", warehouseCode)
+                .query(Long.class)
+                .single();
+    }
+
     private void receiveColdBrew(int qty) {
         postAndExpectSuccess(request("receipt:VALIDATION:" + qty, "RECEIPT", null, null,
                 line("ICN01", "V-SUPPLIER", "SKU-200002", "L20260910-B", -qty),
