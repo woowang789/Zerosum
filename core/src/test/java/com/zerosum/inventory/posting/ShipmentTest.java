@@ -45,7 +45,7 @@ class ShipmentTest extends AbstractIntegrationTest {
         AllocationResult allocated = allocationGateway.allocate(
                 new AllocateRequest("alloc:ORD-SHIP-0001-1", "ORD-SHIP-0001-1", "ICN01", "SKU-200002", 60, false));
 
-        postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-0001-1:1", allocationIdValues(allocated),
+        postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-0001-1:1", "ORD-SHIP-0001-1", allocationIdValues(allocated),
                 line("ICN01", "A-01-02-1", "SKU-200002", "L20260901-A", -50),
                 line("ICN01", "V-CUSTOMER", "SKU-200002", "L20260901-A", 50),
                 line("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B", -10),
@@ -72,7 +72,7 @@ class ShipmentTest extends AbstractIntegrationTest {
 
         AllocationResult allocated = allocationGateway.allocate(
                 new AllocateRequest("alloc:ORD-SHIP-D14-1", "ORD-SHIP-D14-1", "ICN01", "SKU-300001", 15, false));
-        postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-D14-1:1", allocationIdValues(allocated),
+        postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-D14-1:1", "ORD-SHIP-D14-1", allocationIdValues(allocated),
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", -15),
                 line("ICN01", "V-CUSTOMER", "SKU-300001", "DEFAULT", 15)));
         assertThat(onHandQty("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT")).isEqualTo(5);
@@ -96,7 +96,7 @@ class ShipmentTest extends AbstractIntegrationTest {
         AllocationResult allocated = allocationGateway.allocate(
                 new AllocateRequest("alloc:ORD-SHIP-CONC-1", "ORD-SHIP-CONC-1", "ICN01", "SKU-100001", 50, false));
 
-        PostingRequest shipment = shipmentRequest("ship:ORD-SHIP-CONC-1:1", allocationIdValues(allocated),
+        PostingRequest shipment = shipmentRequest("ship:ORD-SHIP-CONC-1:1", "ORD-SHIP-CONC-1", allocationIdValues(allocated),
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", -50),
                 line("ICN01", "V-CUSTOMER", "SKU-100001", "DEFAULT", 50));
 
@@ -129,10 +129,15 @@ class ShipmentTest extends AbstractIntegrationTest {
         return result.allocationIds().stream().map(AllocationId::value).toList();
     }
 
-    private static PostingRequest shipmentRequest(String idemKey, List<Long> consumeAllocationIds,
-            PostingLineInput... lines) {
+    /**
+     * sourceRef에는 <b>주문 줄</b>을 넣는다 — sourceType이 "ORDER"인데 멱등 키를 넣어 두면 그 두 값이
+     * 가리키는 것이 달라진다. 소진 대상 할당이 그 주문 줄의 것인지 서버가 대조하므로(ALLOC_ORDER_MISMATCH)
+     * 여기서 멱등 키를 넣으면 거절된다 — 이 테스트들이 원래부터 잘못 넣고 있었다.
+     */
+    private static PostingRequest shipmentRequest(String idemKey, String orderLineRef,
+            List<Long> consumeAllocationIds, PostingLineInput... lines) {
         return new PostingRequest(idemKey, "SHIPMENT", "USER", "user:test", List.of(lines),
-                "ORDER", idemKey, null, null, Instant.now(), consumeAllocationIds);
+                "ORDER", orderLineRef, null, null, Instant.now(), consumeAllocationIds);
     }
 
     private int allocatedQty(String warehouseCode, String locationCode, String skuCode, String lotNo) {

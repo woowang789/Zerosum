@@ -100,7 +100,8 @@ class InventorySequencePropertyTest extends AbstractIntegrationTest {
     }
 
     /** ALLOCATE가 실제로 예약한 잔액 행 — SHIPMENT 연산의 후보 풀. FEFO 결과를 DB에서 그대로 읽은 값이다. */
-    private record AllocRecord(long allocationId, String location, String sku, String lot, int qty) {
+    private record AllocRecord(long allocationId, String orderLineRef, String location, String sku, String lot,
+            int qty) {
     }
 
     private record OpRecord(OpType type, boolean success, String rejectionCode, List<BalanceDelta> deltas) {
@@ -367,8 +368,10 @@ class InventorySequencePropertyTest extends AbstractIntegrationTest {
         String idemKey = run.nextIdemKey("ship");
         run.lastAttemptDescription = "SHIPMENT idemKey=%s allocationId=%d loc=%s sku=%s lot=%s qty=%d"
                 .formatted(idemKey, alloc.allocationId(), alloc.location(), alloc.sku(), alloc.lot(), alloc.qty());
-        PostingRequest req = new PostingRequest(idemKey, "SHIPMENT", "USER", "user:test", lines, "ORDER", idemKey,
-                null, null, Instant.now(), List.of(alloc.allocationId()));
+        // sourceRef는 이 예약이 걸린 주문 줄이다 — 멱등 키가 아니다. 서버가 소진 대상 할당의 주문 줄과
+        // 대조하므로(ALLOC_ORDER_MISMATCH) 어긋나면 거절된다.
+        PostingRequest req = new PostingRequest(idemKey, "SHIPMENT", "USER", "user:test", lines, "ORDER",
+                alloc.orderLineRef(), null, null, Instant.now(), List.of(alloc.allocationId()));
         return submitPosting(run, OpType.SHIPMENT, req, lines, true);
     }
 
@@ -458,10 +461,11 @@ class InventorySequencePropertyTest extends AbstractIntegrationTest {
 
     /** ALLOCATE가 실제로 예약한 잔액 행(로케이션·SKU·로트·수량)을 DB에서 읽는다 — FEFO 결과를 그대로 신뢰한다. */
     private AllocRecord queryAllocation(long allocationId) {
-        record Row(String location, String sku, String lot, int qty) {
+        record Row(String orderLineRef, String location, String sku, String lot, int qty) {
         }
         Row row = jdbcClient.sql("""
-                SELECT l.code AS location, s.code AS sku, lo.lot_no AS lot, a.qty AS qty
+                SELECT a.order_line_ref AS order_line_ref, l.code AS location, s.code AS sku, lo.lot_no AS lot,
+                       a.qty AS qty
                 FROM allocation a
                 JOIN stock_balance b ON b.id = a.balance_id
                 JOIN location l ON l.id = b.location_id
@@ -470,10 +474,10 @@ class InventorySequencePropertyTest extends AbstractIntegrationTest {
                 WHERE a.id = :id
                 """)
                 .param("id", allocationId)
-                .query((rs, rowNum) -> new Row(rs.getString("location"), rs.getString("sku"), rs.getString("lot"),
-                        rs.getInt("qty")))
+                .query((rs, rowNum) -> new Row(rs.getString("order_line_ref"), rs.getString("location"),
+                        rs.getString("sku"), rs.getString("lot"), rs.getInt("qty")))
                 .single();
-        return new AllocRecord(allocationId, row.location(), row.sku(), row.lot(), row.qty());
+        return new AllocRecord(allocationId, row.orderLineRef(), row.location(), row.sku(), row.lot(), row.qty());
     }
 
     /** 모델 오라클 ②: 이 창고의 실제 stock_balance 전부를 모델과 양방향으로 비교한다. */

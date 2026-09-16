@@ -134,7 +134,8 @@ async function confirmShipment(user: UserEvent, orderLineRef: string, allocation
   for (const label of allocationIdLabels) {
     await user.click(within(panel).getByRole('checkbox', { name: new RegExp(`ID ${label}$`) }))
   }
-  await user.type(within(panel).getByLabelText('주문번호(orderLineRef)'), orderLineRef)
+  // 주문번호는 입력하지 않는다 — 고른 예약에서 끌어온다. 끌어온 값이 기대와 같은지 여기서 확인한다.
+  expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue(orderLineRef)
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
 }
 
@@ -375,7 +376,7 @@ it('고른 뒤 해제한 할당은 출고 본문에 실리지 않는다', async 
   expect(await within(row).findByText('해제됨')).toBeInTheDocument()
   expect(releaseBodies).toEqual([{ allocationIds: [11] }])
 
-  await user.type(within(panel).getByLabelText('주문번호(orderLineRef)'), 'SO-2002')
+  expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue('SO-2002')
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
 
   expect(await screen.findByText('출고가 확정됐다 — 거래 #777')).toBeInTheDocument()
@@ -491,7 +492,7 @@ it('출고 차수와 allowInCount가 입력한 대로 나간다', async () => {
   const seq = within(panel).getByLabelText('출고 차수(shipmentSeq)')
   await user.clear(seq)
   await user.type(seq, '3')
-  await user.type(within(panel).getByLabelText('주문번호(orderLineRef)'), 'SO-4001')
+  expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue('SO-4001')
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
 
   expect(await screen.findByText('출고가 확정됐다 — 거래 #999')).toBeInTheDocument()
@@ -540,4 +541,61 @@ it('서버가 출고를 거절하면 그 이유가 화면에 뜬다', async () =
 
   expect(await screen.findByText('소진하려는 할당의 잔액 행이 출고 줄에 없다')).toBeInTheDocument()
   expect(screen.queryByText(/출고가 확정됐다/)).not.toBeInTheDocument()
+})
+
+/**
+ * 주문번호는 고른 예약에서 끌어오고, 두 주문에 걸치면 출고가 막힌다.
+ *
+ * <p>전에는 자유 입력이었다. SO-1001의 예약을 고른 채 SO-9999를 적으면 그대로 나갔고, 그러면
+ * 원장에는 SO-9999로 나갔다고 남는데 예약은 SO-1001의 것이라 감사 기록이 갈라졌다. 더 나쁜 것은
+ * {@code shipment:SO-9999:1}을 선점해 버리는 것이다 — 나중에 SO-9999를 진짜 출고하면 새 거래가
+ * 생기지 않고 이 거래가 조용히 재생된다. 업무 식별자로 만든 키가 그 업무를 가리키지 않게 되는,
+ * 실사 시작이 (창고, 로케이션)을 키로 삼아 재실사를 막던 것과 같은 부류의 결함이다.
+ *
+ * <p>서버도 같은 것을 대조하지만(ALLOC_ORDER_MISMATCH, ShipmentOrderLineTest), 화면에서는 애초에
+ * 어긋나게 만들 수가 없어야 한다 — 눌러 봐야 거절당하는 버튼은 안내가 아니다.
+ */
+it('주문번호는 고른 예약에서 끌어오고, 두 주문에 걸치면 출고가 막힌다', async () => {
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-6001': {
+          allocationIds: [61],
+          lines: [
+            { allocationId: 61, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 3 },
+          ],
+        },
+        'SO-6002': {
+          allocationIds: [62],
+          lines: [
+            { allocationId: 62, locationCode: 'ICN01-B-02', skuCode: 'SKU-200002', lotNo: 'L20261120-C', qty: 2 },
+          ],
+        },
+      },
+      [],
+    ),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-6001', 'SKU-200002', 3)
+  await allocate(user, 'SO-6002', 'SKU-200002', 2)
+
+  const panel = section('2단계 — 출고 확정')
+  const field = within(panel).getByLabelText('주문번호(orderLineRef)')
+
+  // 아무것도 고르지 않았으면 비어 있고 출고할 수 없다.
+  expect(field).toHaveValue('')
+  expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
+
+  // 하나를 고르면 그 주문 줄이 채워진다 — 사람이 적는 값이 아니다.
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 61$/ }))
+  expect(field).toHaveValue('SO-6001')
+  expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeEnabled()
+
+  // 다른 주문의 예약까지 고르면 출고가 막히고 이유가 보인다.
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 62$/ }))
+  expect(field).toHaveValue('')
+  expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
+  expect(screen.getByText(/주문 줄 2개에 걸쳐 있다/)).toBeInTheDocument()
 })

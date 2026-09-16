@@ -319,7 +319,6 @@ function ShipmentPanel({
   onConsumed: (keys: string[]) => void
 }) {
   const [warehouseCode, setWarehouseCode] = useState(warehouses[0] ?? '')
-  const [orderLineRef, setOrderLineRef] = useState('')
   const [shipmentSeq, setShipmentSeq] = useState('1')
   const [selectedAllocKeys, setSelectedAllocKeys] = useState<Set<string>>(new Set())
   const [lastResult, setLastResult] = useState<PostingResultResponse | null>(null)
@@ -344,6 +343,13 @@ function ShipmentPanel({
   // 거절되고, 사용자는 새로고침 말고는 빠져나올 길이 없었다.
   const selectedAllocations = allocations.filter((a) => a.status === 'active' && selectedAllocKeys.has(a.key))
   const consumeAllocationIds = selectedAllocations.flatMap((a) => a.allocationIds)
+  // 주문번호는 사람이 적지 않는다 — 고른 예약이 걸린 주문 줄을 그대로 쓴다. 자유 입력이던 동안에는
+  // SO-1001의 예약을 고른 채 SO-9999를 적어도 그대로 나갔고, 그러면 원장은 SO-9999로 남는데 예약은
+  // SO-1001의 것이라 감사 기록이 갈라졌다. 더 나쁜 것은 shipment:SO-9999:1을 선점해 버리는 것이다 —
+  // 나중에 SO-9999를 진짜 출고하면 새 거래가 생기지 않고 이 거래가 재생된다.
+  // 서버도 같은 것을 대조하지만(ALLOC_ORDER_MISMATCH) 여기서는 애초에 어긋나게 만들 수가 없게 한다.
+  const selectedOrderLineRefs = [...new Set(selectedAllocations.map((a) => a.orderLineRef))]
+  const orderLineRef = selectedOrderLineRefs.length === 1 ? selectedOrderLineRefs[0] : ''
   // 출고 줄은 사용자가 입력하지 않는다 — 소진할 할당을 고르면 그 할당이 예약한 물리 줄(서버가 FEFO로
   // 고른 로케이션·로트·수량)을 그대로 쓴다. 그래서 물리 줄이 할당과 어긋날 일이 없다(ORPHAN_CONSUME 방지).
   const parsedLines = selectedAllocations
@@ -363,8 +369,8 @@ function ShipmentPanel({
     onSuccess: (result) => {
       setLastResult(result)
       onConsumed([...selectedAllocKeys])
+      // 선택만 비우면 주문번호도 따라 비워진다 — 고른 예약에서 끌어오기 때문이다.
       setSelectedAllocKeys(new Set())
-      setOrderLineRef('')
     },
   })
 
@@ -382,7 +388,7 @@ function ShipmentPanel({
     customerTotals.set(key, (customerTotals.get(key) ?? 0) + l.qtyNum)
   }
   const idemKey = `shipment:${orderLineRef || '?'}:${shipmentSeq || '?'}`
-  const canSubmit = orderLineRef.trim() !== '' && parsedLines.length > 0 && consumeAllocationIds.length > 0
+  const canSubmit = selectedOrderLineRefs.length === 1 && parsedLines.length > 0 && consumeAllocationIds.length > 0
 
   return (
     <div className="detail-section">
@@ -410,10 +416,18 @@ function ShipmentPanel({
               ))}
             </select>
           </label>
+          {/* 힌트는 label 밖에 둔다 — 안에 넣으면 라벨 텍스트에 섞여 접근성 이름이 오염된다. */}
           <label className="field">
             <span className="field-label">주문번호(orderLineRef)</span>
-            <input type="text" value={orderLineRef} onChange={(e) => setOrderLineRef(e.target.value)} required />
+            <input type="text" value={orderLineRef} readOnly aria-describedby="order-line-hint" />
           </label>
+          <p id="order-line-hint" className="field-hint">
+            {selectedOrderLineRefs.length === 0
+              ? '소진할 할당을 고르면 그 주문 줄이 채워진다.'
+              : selectedOrderLineRefs.length > 1
+                ? `고른 예약이 주문 줄 ${selectedOrderLineRefs.length}개에 걸쳐 있다(${selectedOrderLineRefs.join(', ')}) — 한 출고는 주문 줄 하나에 속한다.`
+                : '고른 예약이 걸린 주문 줄이다.'}
+          </p>
           <label className="field">
             <span className="field-label">출고 차수(shipmentSeq)</span>
             <input
