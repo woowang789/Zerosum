@@ -45,7 +45,7 @@ AI 쓰기 표면 둘(`create_proposal`의 `payload.issueId`, `write_issue_analys
 
 이슈의 상태 전이(`acknowledge`·`resolve`)는 AI에게 위임하지 않는다 — `write_issue_analysis`가 건드릴 수 있는 것은 `ai_analysis` 컬럼 하나뿐이고, `status`·`acked_*`·`resolved_*`는 ai_proposer 계정 자체에 컬럼 권한이 없어 SQL 문법 수준에서부터 막힌다(V4의 컬럼 단위 GRANT). 이 보장의 범위는 정확히 "ai_proposer 커넥션으로는 불가능"이지 "아무도 불가능"이 아니다 — app_rw로 접속하는 사람 쪽 코드(`ReconciliationService`)는 여전히 그 컬럼들을 바꿀 수 있고, 실제로 이슈를 닫는 것도 그쪽이다.
 
-MCP 전송 계층(`spring-ai-starter-mcp-server-webmvc` 등)은 4단계 범위가 아니다. 도구 계약은 이미 `AiQueryService`·`AiAnalysisService`의 메서드 이름과 1:1로 고정돼 있어 전송 어댑터를 붙여도 위임 코드 몇 줄만 늘어난다. 넣지 않은 이유는 득실 계산 때문이다 — 톰캣 서블릿 컨테이너가 붙으면 `@SpringBootTest`의 컨텍스트 종류가 바뀌어 이 프로젝트의 테스트 전체가 그 영향권에 들어가는데, 얻는 것은 JSON-RPC 프레이밍이 동작한다는 확인뿐이라 정합성에 대한 주장이 아니다.
+MCP 전송 계층은 4단계 범위가 아니었다. **그 뒤에 `:mcp-server` 모듈로 붙였다** — STDIO 전송(`spring-ai-starter-mcp-server`)이라 아래 걱정한 톰캣 문제는 생기지 않는다(실측: 이 모듈의 tomcat 의존 0건). 아래는 당시의 판단 기록이다. 도구 계약은 이미 `AiQueryService`·`AiAnalysisService`의 메서드 이름과 1:1로 고정돼 있어 전송 어댑터를 붙여도 위임 코드 몇 줄만 늘어난다. 넣지 않은 이유는 득실 계산 때문이다 — 톰캣 서블릿 컨테이너가 붙으면 `@SpringBootTest`의 컨텍스트 종류가 바뀌어 이 프로젝트의 테스트 전체가 그 영향권에 들어가는데, 얻는 것은 JSON-RPC 프레이밍이 동작한다는 확인뿐이라 정합성에 대한 주장이 아니다.
 
 ## 제안 실행 규칙
 

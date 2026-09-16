@@ -23,7 +23,7 @@
 | 증거 | 수치 |
 |---|---|
 | 테스트 | **348건 PASS** (core 252 / web 51 / 프론트 42 / mcp-server 3), 실패·에러 0 |
-| 스키마 하네스 (PL/pgSQL) | **191건 PASS** |
+| 스키마 하네스 (PL/pgSQL) | **192건 PASS** |
 | 속성 기반 시퀀스 | **4,400 연산**을 무작위로 섞어 실행, 매 단계 정합 검증 0건 |
 | 테스트 DB | Testcontainers PostgreSQL 16 (H2 아님 — 행 잠금과 지연 제약이 달라 증거가 되지 못한다) |
 
@@ -140,7 +140,7 @@ cd frontend && npm run test
 
 ### 스키마 하네스
 
-DDL만 바꿨을 때 Java 컴파일 없이 몇 초 만에 전부 다시 돌려보는 PL/pgSQL 하네스. 유스케이스 **191건**.
+DDL만 바꿨을 때 Java 컴파일 없이 몇 초 만에 전부 다시 돌려보는 PL/pgSQL 하네스. 유스케이스 **192건**.
 
 ```bash
 bash db/run.sh
@@ -166,10 +166,29 @@ Java 21 · Spring Boot 4.1.1 · PostgreSQL 16 · Gradle 9.7.1 · Spring AI 1.1.0
 Docker가 필요하다 (Testcontainers).
 
 ```bash
-./gradlew test          # Java 306건 + 프론트 42건
-bash db/run.sh          # 스키마 하네스 191건
-./gradlew :web:bootRun  # http://localhost:8080
+./gradlew test          # Java 306건 + 프론트 42건 — 컨테이너를 알아서 띄운다
+bash db/run.sh          # 스키마 하네스 192건 — 컨테이너를 띄우고 스키마·시드를 적재한 뒤 남겨둔다
 ```
+
+앱을 띄워 보려면 `db/run.sh`가 남긴 컨테이너를 그대로 쓴다. **그 컨테이너는 55433 포트이고
+`:web`의 기본 설정은 5432라 그냥 실행하면 연결이 거부된다** — 주소를 넘겨야 한다. 마이그레이션과
+시드는 `db/run.sh`가 이미 적용해 뒀다(`:web`은 `flyway.enabled: false`다 — 웹 앱이 스키마를
+바꾸지 않는다).
+
+```bash
+bash db/run.sh
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:55433/zerosum \
+ZEROSUM_AI_READ_URL=jdbc:postgresql://localhost:55433/zerosum \
+ZEROSUM_AI_PROPOSER_URL=jdbc:postgresql://localhost:55433/zerosum \
+  ./gradlew :web:bootRun   # http://localhost:8080 — choi.dw / park.jh / lee.sm, 비밀번호는 zerosum
+```
+
+**아웃박스 릴레이와 정합 검증 배치는 이렇게 띄운 `:web`에서 돌지 않는다.** 웹 모듈이 그 둘을
+꺼 두기 때문이고(`web/src/main/resources/application.yml`), 의도된 것이다 — 배치는 복제본마다
+돌면 안 되는 별도 프로세스의 일이다. 그래서 README 첫머리의 사슬 중 "배치가 불일치를 탐지"는
+이 실행에서 저절로 일어나지 않는다. 지금 그 배치를 실제로 돌리는 것은 테스트
+(`ReconciliationService#runOnce`를 직접 부르는 코어 테스트들)와 하네스뿐이고, 전용 실행 모듈은
+아직 없다.
 
 ## 문서
 

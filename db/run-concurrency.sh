@@ -85,6 +85,10 @@ INSERT INTO tst_result (case_id, title, expect, outcome, detail) VALUES
    CASE WHEN $G02_QTY=97 THEN 'PASS' ELSE 'FAIL' END, '실재고 $G02_QTY'),
  ('UC-G03','반대 방향 이동 200회 동시 → 데드락 0건','= 0',
    CASE WHEN $G03_DL=0 THEN 'PASS' ELSE 'FAIL' END, '데드락 $G03_DL건, 성공 $G03_OK건'),
+ -- 데드락 0건과 합계 불변만 보면 이동이 **한 건도 일어나지 않아도** 둘 다 PASS다. 실제로 돌았는지를
+ -- 함께 단언해야 이 케이스가 동시성을 검증한다고 말할 수 있다.
+ ('UC-G03','이동이 실제로 일어났다 (전부 실패한 것이 아니다)','> 0',
+   CASE WHEN $G03_OK>0 THEN 'PASS' ELSE 'FAIL' END, '성공 $G03_OK건'),
  ('UC-G03','두 로케이션 합계 불변','= $G03_BEFORE',
    CASE WHEN $G03_AFTER=$G03_BEFORE THEN 'PASS' ELSE 'FAIL' END, '이전 $G03_BEFORE / 이후 $G03_AFTER'),
  ('UC-G04','같은 로케이션 동시 실사 시작 10회 → 세션 1개','= 1',
