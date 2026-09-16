@@ -195,9 +195,8 @@ public class AllocationRepository {
 
     // ── 할당 해제 (docs/04-write-path.md 할당 해제 규칙) ────────────────────────────────
 
-    /** 해제 대상 할당이 가리키는 잔액 행 id, 중복 제거 후 오름차순. FOR UPDATE 잠금 순서. */
-    @Transactional(propagation = Propagation.MANDATORY)
     /** 소진 대상 할당들이 걸린 주문 줄. 둘 이상이면 한 출고가 여러 주문의 예약을 섞어 소진하는 것이다. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public List<String> distinctOrderLineRefs(List<Long> allocationIds) {
         if (allocationIds.isEmpty()) {
             return List.of();
@@ -208,6 +207,8 @@ public class AllocationRepository {
                 .list();
     }
 
+    /** 해제 대상 할당이 가리키는 잔액 행 id, 중복 제거 후 오름차순. FOR UPDATE 잠금 순서. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public List<Long> distinctBalanceIds(List<AllocationId> allocationIds) {
         if (allocationIds.isEmpty()) {
             return List.of();
@@ -219,6 +220,15 @@ public class AllocationRepository {
     }
 
     public record AllocationRow(AllocationId id, BalanceId balanceId, int qty) {
+    }
+
+    /** 이 회차(idem_key)의 할당 중 ACTIVE가 아닌 것의 수. 재생이 거짓말을 하는지 판단하는 데 쓴다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int closedCountOf(String idemKey) {
+        return jdbc.sql("SELECT count(*) FROM allocation WHERE idem_key = :key AND status <> 'ACTIVE'")
+                .param("key", idemKey)
+                .query(Integer.class)
+                .single();
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

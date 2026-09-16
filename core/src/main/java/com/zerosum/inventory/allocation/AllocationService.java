@@ -71,6 +71,15 @@ public class AllocationService {
      */
     @Transactional
     public AllocationResult allocate(AllocateRequest request) {
+        // 회차 키를 만들기 **전에** 막는다. qty가 0 이하면 배분 루프가 한 바퀴도 돌지 않아 allocation 행이
+        // 0건인 채로 결과가 기록되는데, 회차는 "ACTIVE가 하나도 없는 idem_key"로 세므로 행이 아예 없는
+        // 회차는 영원히 닫히지 않는다 — 그 주문 줄은 회차 0에 고정돼 이후 정상 할당이 매번 409가 된다.
+        // 이 검증이 없앤 바로 그 상태(주문 줄이 영구히 재할당 불가)가 다른 문으로 되살아난다.
+        // 코어가 막아야 한다 — :web 말고 MCP·제안 경로도 이 서비스를 부른다.
+        if (request.qty() <= 0) {
+            throw new AllocationException("NON_POSITIVE_QTY",
+                    "할당 수량은 양수여야 한다: %d".formatted(request.qty()));
+        }
         String idemKey = "allocate:%s:%d".formatted(
                 request.orderLineRef(), allocationRepo.closedRoundCount(request.orderLineRef()));
         String requestHash = sha256Hex(request.orderLineRef() + "|" + request.warehouseCode() + "|"
@@ -81,6 +90,18 @@ public class AllocationService {
         if (!isNew) {
             if (!allocationRepo.storedRequestHash(idemKey).equals(requestHash)) {
                 throw new IdempotencyConflictException(idemKey);
+            }
+            // 재생이 거짓말을 하지 않게 한다. 회차는 "ACTIVE가 하나도 없는 idem_key"로 세므로, 일부만
+            // 해제·소진된 회차는 아직 열린 것으로 남는다 — 그대로 재생하면 RELEASED·CONSUMED가 섞인
+            // id 목록을 200으로 돌려주게 되고, 호출자는 30개가 예약된 줄 알지만 실제 ACTIVE는 10개다.
+            // 이 회차 방식이 없애려던 "조용한 초과 판매"의 부분 버전이고, allocated_qty와 ACTIVE 합계는
+            // 서로 맞으므로 정합 검증 ②도 보지 못한다.
+            //
+            // 대가: 부분 소진 뒤에 도착한 정직한 재시도(네트워크 재전송 등)도 이 거절을 받는다. 틀린
+            // 답을 200으로 주는 것보다 낫다고 보고 택했다 — 호출자는 상태를 다시 읽어 판단할 수 있다.
+            if (allocationRepo.closedCountOf(idemKey) > 0) {
+                throw new AllocationException("ALLOC_ROUND_PARTIALLY_CLOSED",
+                        "이 회차의 예약 일부가 이미 해제·소진됐다 — 재생할 수 없다 (%s)".formatted(idemKey));
             }
             return new AllocationResult(allocationRepo.replayAllocationIds(idemKey));
         }

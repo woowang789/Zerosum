@@ -141,6 +141,77 @@ class AllocationRoundTest extends AbstractIntegrationTest {
 
     // ── 픽스처·조회 헬퍼 ────────────────────────────────────────────────────────────
 
+    /**
+     * 수량 0(또는 음수) 할당이 회차 키를 태우지 않는다.
+     *
+     * <p>이 회차 방식이 없애려던 상태가 다른 문으로 되살아날 뻔했다. qty가 0 이하면 배분 루프가 한
+     * 바퀴도 돌지 않아 allocation 행이 <b>0건</b>인 채로 결과가 기록되는데, 회차는 "ACTIVE가 하나도 없는
+     * {@code idem_key}"로 세므로 <b>행이 아예 없는 회차는 영원히 닫히지 않는다</b> — 그 주문 줄은 회차 0에
+     * 고정돼 이후 정상 할당이 매번 409가 된다. 되돌리려면 DB를 직접 고치는 수밖에 없다.
+     *
+     * <p>실측으로 확인한 모양이었다: {@code qty=0 → 성공, ids=[]} 뒤 {@code qty=30 →
+     * IdempotencyConflictException(allocate:ORD-...:0)}. 코어가 막는다 — :web 말고 MCP·제안 경로도
+     * 이 서비스를 부르므로 창구 검증만으로는 부족하다.
+     */
+    @Test
+    void nonPositiveQtyIsRejectedAndDoesNotBurnTheRound() {
+        putaway120();
+
+        assertThatThrownBy(() -> allocationGateway.allocate(
+                new AllocateRequest("ORD-NONPOS", "ICN01", "SKU-100001", 0, false)))
+                .as("수량 0은 거절된다")
+                .isInstanceOf(com.zerosum.inventory.domain.AllocationException.class);
+        assertThatThrownBy(() -> allocationGateway.allocate(
+                new AllocateRequest("ORD-NONPOS", "ICN01", "SKU-100001", -5, false)))
+                .as("음수도 마찬가지다")
+                .isInstanceOf(com.zerosum.inventory.domain.AllocationException.class);
+
+        // 그리고 그 주문 줄은 여전히 정상으로 할당된다 — 키가 타지 않았다는 증거다.
+        AllocationResult ok = allocationGateway.allocate(
+                new AllocateRequest("ORD-NONPOS", "ICN01", "SKU-100001", 30, false));
+        assertThat(ok.allocationIds()).as("거절이 회차를 태우지 않았다").isNotEmpty();
+        assertThat(allocatedQty()).isEqualTo(30);
+        assertReconciliationClean();
+    }
+
+    /**
+     * 회차가 일부만 닫혔으면 재생하지 않고 거절한다.
+     *
+     * <p>회차는 "ACTIVE가 하나도 없는 {@code idem_key}"로 센다. FEFO가 여러 로트에 걸쳐 만든 행 중
+     * 일부만 해제·소진되면 회차는 <b>열린 채로</b> 남고, 같은 요청의 재생은 RELEASED·CONSUMED가 섞인
+     * id 목록을 200으로 돌려주게 된다 — 호출자는 30개가 예약된 줄 알지만 실제 ACTIVE는 그보다 적다.
+     * 이 회차 방식이 없애려던 "조용한 초과 판매"의 부분 버전이고, {@code allocated_qty}와 ACTIVE 합계는
+     * 서로 맞으므로 정합 검증 ②도 보지 못한다.
+     *
+     * <p>대가는 주석에 적었다 — 부분 소진 뒤 도착한 정직한 재시도도 이 거절을 받는다. 틀린 답을
+     * 200으로 주는 것보다 낫다.
+     */
+    @Test
+    void partiallyClosedRoundIsNotReplayed() {
+        // 로트 둘에 나눠 적치해 FEFO가 두 행에 걸치게 한다 — 한 행만 닫히는 상태를 만들려면 필요하다.
+        postAndExpectSuccess(request("receipt:PO-PARTIAL-A:1", "RECEIPT", null, null,
+                line("ICN01", "V-SUPPLIER", "SKU-200002", "L20260901-A", -20),
+                line("ICN01", "A-01-01-1", "SKU-200002", "L20260901-A", 20)));
+        postAndExpectSuccess(request("receipt:PO-PARTIAL-B:1", "RECEIPT", null, null,
+                line("ICN01", "V-SUPPLIER", "SKU-200002", "L20260910-B", -20),
+                line("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B", 20)));
+
+        AllocationResult first = allocationGateway.allocate(
+                new AllocateRequest("ORD-PARTIAL", "ICN01", "SKU-200002", 30, false));
+        assertThat(first.allocationIds()).as("두 로트에 걸쳐야 부분 상태를 만들 수 있다").hasSizeGreaterThan(1);
+
+        // 한 행만 해제한다 — 회차는 아직 열려 있다.
+        allocationGateway.release("release:ORD-PARTIAL", List.of(first.allocationIds().get(0)));
+
+        assertThatThrownBy(() -> allocationGateway.allocate(
+                new AllocateRequest("ORD-PARTIAL", "ICN01", "SKU-200002", 30, false)))
+                .as("닫힌 예약이 섞인 회차를 그대로 재생하면 예약량을 부풀려 답하게 된다")
+                .isInstanceOf(com.zerosum.inventory.domain.AllocationException.class)
+                .hasMessageContaining("해제·소진");
+
+        assertReconciliationClean();
+    }
+
     private void putaway120() {
         postAndExpectSuccess(request("receipt:PO-ROUND-SEED:1", "RECEIPT", null, null,
                 line("ICN01", "V-SUPPLIER", "SKU-100001", "DEFAULT", -120),

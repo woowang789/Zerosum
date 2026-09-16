@@ -4,6 +4,7 @@ import com.zerosum.inventory.allocation.AllocateRequest;
 import com.zerosum.inventory.allocation.AllocationGateway;
 import com.zerosum.inventory.allocation.AllocationResult;
 import com.zerosum.inventory.domain.AllocationId;
+import com.zerosum.inventory.web.error.InvalidRequestException;
 import com.zerosum.inventory.web.security.AccessGuard;
 import java.util.List;
 import java.util.Set;
@@ -40,6 +41,11 @@ public class AllocationController {
     public AllocateResponse allocate(@RequestBody AllocateRequestBody request, Authentication authentication) {
         AccessGuard.requireAnyRole(authentication, "OPERATOR", "SUPERVISOR");
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
+        // 입고·출고·이동과 같은 이유로 여기서도 막는다(PostingController#requirePositiveQty). 코어도 스스로
+        // 막지만(AllocationService), 창구에서 걸러야 400으로 "무엇이 잘못됐는지"를 말해줄 수 있다.
+        if (request.qty() <= 0) {
+            throw new InvalidRequestException("NON_POSITIVE_QTY", "할당 수량은 양수여야 한다: %d".formatted(request.qty()));
+        }
 
         AllocationResult result = allocationGateway.allocate(new AllocateRequest(request.orderLineRef(),
                 request.warehouseCode(), request.skuCode(), request.qty(), request.allowInCount()));
