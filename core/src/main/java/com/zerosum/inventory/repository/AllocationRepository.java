@@ -174,6 +174,17 @@ public class AllocationRepository {
 
     /** 해제 대상 할당이 가리키는 잔액 행 id, 중복 제거 후 오름차순. FOR UPDATE 잠금 순서. */
     @Transactional(propagation = Propagation.MANDATORY)
+    /** 소진 대상 할당들이 걸린 주문 줄. 둘 이상이면 한 출고가 여러 주문의 예약을 섞어 소진하는 것이다. */
+    public List<String> distinctOrderLineRefs(List<Long> allocationIds) {
+        if (allocationIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT DISTINCT order_line_ref FROM allocation WHERE id IN (:ids) ORDER BY 1")
+                .param("ids", allocationIds)
+                .query(String.class)
+                .list();
+    }
+
     public List<Long> distinctBalanceIds(List<AllocationId> allocationIds) {
         if (allocationIds.isEmpty()) {
             return List.of();

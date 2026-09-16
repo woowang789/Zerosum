@@ -34,7 +34,9 @@ class DuplicateKeyShipmentTest extends AbstractIntegrationTest {
                 List.of(line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", -5),
                         line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", -3),
                         line("ICN01", "V-CUSTOMER", "SKU-100001", "DEFAULT", 8)),
-                "ORDER", "ORD-DUPSHIP", null, null, Instant.now(), allocIds), Preconditions.none());
+                // sourceRef는 할당을 만든 주문 줄과 같아야 한다 — 전에는 "ORD-DUPSHIP"으로 한 글자 어긋나
+                // 있었고 아무도 보지 않았다. 대조하는 것이 없었기 때문이다(ALLOC_ORDER_MISMATCH).
+                "ORDER", "ORD-DUPSHIP-1", null, null, Instant.now(), allocIds), Preconditions.none());
 
         int allocatedQty = jdbcClient.sql("""
                 SELECT b.allocated_qty FROM stock_balance b

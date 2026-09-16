@@ -122,6 +122,25 @@ public class PostingService {
                             .formatted(consumedQtyByBalance.keySet()));
         }
 
+        // 소진 대상 할당은 이 출고가 내건 주문 줄의 것이어야 한다. 출고의 멱등 키가
+        // ship:{주문라인}:{출고차수}(docs/04-write-path.md)인 이상 한 출고는 주문 줄 하나에 속하는데,
+        // 지금까지는 그 주문 줄과 소진하는 예약이 아무 데서도 대조되지 않았다 — SO-1001의 예약을 고른 채
+        // 주문번호에 SO-9999를 적으면 그대로 통과했다. 그러면 둘이 어긋난다:
+        //   · 원장에는 SO-9999로 나갔다고 남는데 allocation은 SO-1001 것이다 (감사 기록이 갈라진다)
+        //   · shipment:SO-9999:1 을 선점해 버려, 나중에 SO-9999를 진짜 출고하면 조용히 이 거래가 재생된다
+        // 두 번째가 특히 나쁘다 — 업무 식별자로 만든 키가 그 업무를 가리키지 않게 되는 것이라,
+        // 실사 시작이 (창고, 로케이션)을 키로 삼아 재실사를 막던 것과 같은 부류의 결함이다.
+        List<String> orderLineRefs = allocationRepo.distinctOrderLineRefs(cmd.consumeAllocationIds());
+        if (orderLineRefs.size() > 1) {
+            throw new PostingException("ALLOC_ORDER_MISMATCH",
+                    "한 출고가 서로 다른 주문 줄의 예약을 섞어 소진할 수 없다: %s".formatted(orderLineRefs));
+        }
+        if (!orderLineRefs.isEmpty() && !orderLineRefs.get(0).equals(cmd.sourceRef())) {
+            throw new PostingException("ALLOC_ORDER_MISMATCH",
+                    "소진 대상 할당은 주문 줄 %s의 것인데 이 출고는 %s로 기록된다"
+                            .formatted(orderLineRefs.get(0), cmd.sourceRef()));
+        }
+
         // ⑥ 할당 소진 표시. WHERE status='ACTIVE'의 영향 행 수가 요청한 id 수와 다르면 롤백 (AllocationRepository#markConsumed)
         allocationRepo.markConsumed(cmd.consumeAllocationIds(), txnId);
 
