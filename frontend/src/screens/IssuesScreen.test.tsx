@@ -264,3 +264,54 @@ it('창고 권한이 없는 사용자에게는 이유를 말한다', async () =>
 
   expect(await screen.findByText(/접근할 수 있는 창고가 없다/)).toBeInTheDocument()
 })
+
+/**
+ * 정정 거래 없이 사유만으로 종결하면 {@code resolvedTxnId}가 null로 나간다.
+ *
+ * <p>화면이 직접 안내하는 경로다 — CHAIN_BREAK처럼 이미 기록된 과거 원장을 고칠 수 없는 이슈는
+ * 거래 없이 사유만 남겨 닫는 것이 정상이다({@code app_rw}에 원장 UPDATE 권한이 없다).
+ *
+ * <p>입력칸이 비었을 때 화면은 {@code resolvedTxnId: resolvedTxnId.trim() ? Number(...) : null}로
+ * 보낸다. 이 분기가 무너지면 빈 문자열이 {@code Number('')} = 0으로 굳어 <b>존재하지 않는 거래 #0으로
+ * 종결됐다</b>고 남는다 — 이슈는 닫히는데 감사 기록이 거짓이 되고, 나중에 원인을 되짚는 사람은
+ * 있지도 않은 거래를 찾게 된다. 위 테스트는 항상 id를 채워 넣으므로 이 분기를 지나가지 않는다.
+ */
+it('정정 거래 없이 사유만으로 종결하면 resolvedTxnId가 null로 나간다', async () => {
+  const state = initialIssue()
+  const resolveBodies: ResolveBody[] = []
+  const NOTE = '원장은 고칠 수 없어 사유만 남긴다'
+
+  server.use(
+    meHandler,
+    listHandler(state),
+    detailHandler(state),
+    http.post('*/api/issues/:id/resolve', async ({ request, params }) => {
+      if (!authenticate(request)) return unauthorized()
+      if (params.id !== String(ISSUE_ID)) {
+        return HttpResponse.json({ code: 'ISSUE_NOT_FOUND', message: '이슈를 찾을 수 없다' }, { status: 404 })
+      }
+      const body = (await request.json()) as ResolveBody
+      resolveBodies.push(body)
+      state.status = 'RESOLVED'
+      state.resolvedAt = '2026-09-16T02:00:00Z'
+      state.resolvedBy = 'choi.dw'
+      state.resolutionNote = body.note
+      state.resolvedTxnId = body.resolvedTxnId
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+
+  const user = await renderIssuesScreen('choi.dw')
+  await user.click(await screen.findByRole('row', { name: new RegExp(ISSUE_TYPE) }))
+  expect(await screen.findByRole('heading', { name: new RegExp(`이슈 #${ISSUE_ID}`) })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: '종결' }))
+  await user.type(screen.getByLabelText('종결 사유'), NOTE)
+  // 정정 거래 ID는 비워 둔다 — 이 경로가 이 테스트의 전부다.
+  await user.click(screen.getByRole('button', { name: '종결 확정' }))
+
+  expect(await screen.findByRole('heading', { name: '종결 정보' })).toBeInTheDocument()
+  expect(resolveBodies).toEqual([{ note: NOTE, resolvedTxnId: null }])
+  // 화면도 "거래 없음"으로 읽어야 한다 — #0 같은 것이 뜨면 안 된다.
+  expect(screen.getByText('거래 없음(사유만으로 종결)')).toBeInTheDocument()
+})
