@@ -26,7 +26,7 @@ class DuplicateKeyShipmentTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 20)));
 
         AllocationResult allocated = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-DUPSHIP-1", "ORD-DUPSHIP-1", "ICN01", "SKU-100001", 8, false));
+                new AllocateRequest("ORD-DUPSHIP-1", "ICN01", "SKU-100001", 8, false));
         List<Long> allocIds = allocated.allocationIds().stream().map(id -> id.value()).toList();
 
         // 같은 빈에서 두 번에 나눠 집은 것을 두 줄로 기록한 출고. (SKU, 로트) 합계는 0으로 유효하다.

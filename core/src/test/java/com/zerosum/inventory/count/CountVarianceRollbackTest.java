@@ -94,7 +94,7 @@ class CountVarianceRollbackTest extends AbstractIntegrationTest {
 
     private void allocate(String locationCode, int qty) {
         AllocationResult result = allocationGateway.allocate(new AllocateRequest(
-                "alloc:CC-RB-" + locationCode, "ORD-CC-RB-" + locationCode, "ICN01", "SKU-300001", qty, false));
+                "ORD-CC-RB-" + locationCode, "ICN01", "SKU-300001", qty, false));
         assertThat(result.allocationIds()).isNotEmpty();
     }
 

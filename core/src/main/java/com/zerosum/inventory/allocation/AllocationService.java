@@ -48,18 +48,62 @@ public class AllocationService {
         this.outboxRepo = outboxRepo;
     }
 
+    /**
+     * 할당. 멱등 키는 호출자가 주지 않고 여기서 {@code allocate:{주문줄}:{회차}}로 파생한다.
+     *
+     * <p>키가 {@code allocate:{주문줄}}이던 동안은 <b>업무 식별자가 키가 되려면 그 일이 평생 한 번
+     * 일어나야 한다</b>(docs/04-write-path.md)를 어긴 것이었다. "이 주문 줄을 할당한다"는 반복되는 일이다 —
+     * 해제하고 다시 잡는 것을 docs/03·05가 정상 흐름으로 전제한다. 그래서 해제 뒤 재할당이 첫 할당의
+     * 재생이 되어, 호출자는 200과 id 목록을 받지만 {@code allocated_qty}는 0이고 allocation 행은 RELEASED
+     * 하나뿐이었다(조용한 초과 판매). I5는 양쪽 다 0이라 정합 검증 ②도 이것을 보지 못한다. 수량을 바꿔
+     * 보내면 409라 그 주문 줄은 영구히 재할당 불가가 됐다. 같은 형태를 이미 두 번 고쳤다 —
+     * {@code count:start:{창고}:{로케이션}}, {@code shipment:{주문줄}:{차수}}.
+     *
+     * <p>회차는 이 주문 줄에서 <b>이미 닫힌(ACTIVE가 하나도 없는) 할당 회차의 수</b>다
+     * ({@link AllocationRepository#closedRoundCount}). 1차 때 0, 재시도 때도 0(아직 ACTIVE라), 해제·소진
+     * 뒤엔 1이다. 실사 시작처럼 상태가 재현을 맡되, 실사와 달리 여기에는 직렬화할 단일 행이 없으므로
+     * (할당은 아직 없다) 동시 중복 방지는 그대로 아래 {@code INSERT ... ON CONFLICT DO NOTHING}의 키
+     * 선점이 맡는다. 동시에 들어온 둘은 커밋된 상태만 보므로 같은 회차를 계산하고, 진 쪽은 이긴 트랜잭션이
+     * 끝날 때까지 대기했다가 저장된 결과를 재생한다. 회차 계산을 잠금으로 보호하지 않는 이유는 잠금 순서다 —
+     * allocation을 stock_balance보다 먼저 잠그면 해제(stock_balance → allocation)와 순서가 역전되어
+     * 데드락이 생긴다. 그 대가로 남는 창은 하나뿐이고 순차 호출에서는 닫혀 있다: 해제가 아직 커밋되지 않은
+     * 순간에 같은 주문 줄의 할당이 겹쳐 들어오면 닫히는 중인 회차를 재생한다.
+     */
     @Transactional
     public AllocationResult allocate(AllocateRequest request) {
+        // 회차 키를 만들기 **전에** 막는다. qty가 0 이하면 배분 루프가 한 바퀴도 돌지 않아 allocation 행이
+        // 0건인 채로 결과가 기록되는데, 회차는 "ACTIVE가 하나도 없는 idem_key"로 세므로 행이 아예 없는
+        // 회차는 영원히 닫히지 않는다 — 그 주문 줄은 회차 0에 고정돼 이후 정상 할당이 매번 409가 된다.
+        // 이 검증이 없앤 바로 그 상태(주문 줄이 영구히 재할당 불가)가 다른 문으로 되살아난다.
+        // 코어가 막아야 한다 — :web 말고 MCP·제안 경로도 이 서비스를 부른다.
+        if (request.qty() <= 0) {
+            throw new AllocationException("NON_POSITIVE_QTY",
+                    "할당 수량은 양수여야 한다: %d".formatted(request.qty()));
+        }
+        String idemKey = "allocate:%s:%d".formatted(
+                request.orderLineRef(), allocationRepo.closedRoundCount(request.orderLineRef()));
         String requestHash = sha256Hex(request.orderLineRef() + "|" + request.warehouseCode() + "|"
                 + request.skuCode() + "|" + request.qty());
 
         // ① 멱등 키 선점. 이미 처리된 키면 저장된 결과를 반환 (본문이 다르면 409)
-        boolean isNew = allocationRepo.tryClaimIdempotencyKey(request.idemKey(), "ALLOCATE", requestHash);
+        boolean isNew = allocationRepo.tryClaimIdempotencyKey(idemKey, "ALLOCATE", requestHash);
         if (!isNew) {
-            if (!allocationRepo.storedRequestHash(request.idemKey()).equals(requestHash)) {
-                throw new IdempotencyConflictException(request.idemKey());
+            if (!allocationRepo.storedRequestHash(idemKey).equals(requestHash)) {
+                throw new IdempotencyConflictException(idemKey);
             }
-            return new AllocationResult(allocationRepo.replayAllocationIds(request.idemKey()));
+            // 재생이 거짓말을 하지 않게 한다. 회차는 "ACTIVE가 하나도 없는 idem_key"로 세므로, 일부만
+            // 해제·소진된 회차는 아직 열린 것으로 남는다 — 그대로 재생하면 RELEASED·CONSUMED가 섞인
+            // id 목록을 200으로 돌려주게 되고, 호출자는 30개가 예약된 줄 알지만 실제 ACTIVE는 10개다.
+            // 이 회차 방식이 없애려던 "조용한 초과 판매"의 부분 버전이고, allocated_qty와 ACTIVE 합계는
+            // 서로 맞으므로 정합 검증 ②도 보지 못한다.
+            //
+            // 대가: 부분 소진 뒤에 도착한 정직한 재시도(네트워크 재전송 등)도 이 거절을 받는다. 틀린
+            // 답을 200으로 주는 것보다 낫다고 보고 택했다 — 호출자는 상태를 다시 읽어 판단할 수 있다.
+            if (allocationRepo.closedCountOf(idemKey) > 0) {
+                throw new AllocationException("ALLOC_ROUND_PARTIALLY_CLOSED",
+                        "이 회차의 예약 일부가 이미 해제·소진됐다 — 재생할 수 없다 (%s)".formatted(idemKey));
+            }
+            return new AllocationResult(allocationRepo.replayAllocationIds(idemKey));
         }
 
         WarehouseId warehouseId = new WarehouseId(warehouseRepository.findByCode(request.warehouseCode())
@@ -87,7 +131,7 @@ public class AllocationService {
             int take = Math.min(remaining, candidate.availableQty());
             allocationRepo.incrementAllocated(candidate.id(), take);
             allocationIds.add(allocationRepo.insertAllocation(
-                    request.idemKey(), request.orderLineRef(), candidate.id(), take));
+                    idemKey, request.orderLineRef(), candidate.id(), take));
             remaining -= take;
         }
         if (remaining > 0) {
@@ -95,7 +139,7 @@ public class AllocationService {
         }
 
         outboxRepo.appendStockAllocated(skuId, request.orderLineRef(), request.qty(), allocationIds);
-        allocationRepo.completeAllocated(request.idemKey(), allocationIds);
+        allocationRepo.completeAllocated(idemKey, allocationIds);
         return new AllocationResult(allocationIds);
     }
 

@@ -31,7 +31,7 @@ class AllocationConcurrencyTest extends AbstractIntegrationTest {
         int attempts = 10; // 가용 20개를 5개씩 요청하므로 정확히 4건만 성공해야 한다
         List<Boolean> results = runConcurrently(attempts, index -> {
             try {
-                allocationGateway.allocate(new AllocateRequest("alloc:ORD-ALLOC-CONC-" + index,
+                allocationGateway.allocate(new AllocateRequest(
                         "ORD-ALLOC-CONC-" + index, "ICN01", "SKU-300001", 5, false));
                 return true;
             } catch (AllocationException e) {

@@ -346,11 +346,12 @@ class InventorySequencePropertyTest extends AbstractIntegrationTest {
         String sku = pick(run.rnd, SKUS);
         int qty = 1 + run.rnd.nextInt(20);
         boolean allowInCount = run.rnd.nextBoolean();
-        String idemKey = run.nextIdemKey("alloc");
-        run.lastAttemptDescription = "ALLOCATE idemKey=%s sku=%s qty=%d allowInCount=%s"
-                .formatted(idemKey, sku, qty, allowInCount);
+        // 주문 줄은 시퀀스마다 새로 만든다 — 멱등 키(allocate:{주문줄}:{회차})는 코어가 파생한다.
+        String orderLineRef = run.nextIdemKey("alloc");
+        run.lastAttemptDescription = "ALLOCATE orderLineRef=%s sku=%s qty=%d allowInCount=%s"
+                .formatted(orderLineRef, sku, qty, allowInCount);
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest(idemKey, idemKey, WAREHOUSE, sku, qty, allowInCount));
+                new AllocateRequest(orderLineRef, WAREHOUSE, sku, qty, allowInCount));
         // FEFO를 여기서 다시 구현하지 않는다 — 서버가 실제로 예약한 잔액 행을 DB에서 그대로 읽는다.
         List<AllocRecord> created = result.allocationIds().stream()
                 .map(id -> queryAllocation(id.value()))

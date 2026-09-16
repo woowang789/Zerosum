@@ -46,7 +46,7 @@ class ShipmentOrderLineTest extends AbstractIntegrationTest {
 
     private List<Long> allocate(String orderLineRef, int qty) {
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:" + orderLineRef, orderLineRef, "ICN01", "SKU-200002", qty, false));
+                new AllocateRequest(orderLineRef, "ICN01", "SKU-200002", qty, false));
         return result.allocationIds().stream().map(AllocationId::value).toList();
     }
 

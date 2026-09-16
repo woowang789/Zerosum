@@ -26,7 +26,7 @@ class AllocationReleaseTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 120)));
 
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-REL-0001-1", "ORD-REL-0001-1", "ICN01", "SKU-100001", 30, false));
+                new AllocateRequest("ORD-REL-0001-1", "ICN01", "SKU-100001", 30, false));
         assertThat(availableQty("ICN01", "A-01-01-1", "SKU-100001")).isEqualTo(90);
 
         int released = allocationGateway.release("release:ORD-REL-0001-1", result.allocationIds());
@@ -43,7 +43,7 @@ class AllocationReleaseTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 50)));
 
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-REL-0002-1", "ORD-REL-0002-1", "ICN01", "SKU-100001", 20, false));
+                new AllocateRequest("ORD-REL-0002-1", "ICN01", "SKU-100001", 20, false));
         allocationGateway.release("release:ORD-REL-0002-1", result.allocationIds());
 
         // 같은 할당 id를 다른 멱등 키로 다시 해제하면 이번엔 실제로 시도하다가 ALLOC_NOT_ACTIVE로 실패한다.
@@ -60,9 +60,9 @@ class AllocationReleaseTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 50)));
 
         AllocationResult first = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-REL-0003-1", "ORD-REL-0003-1", "ICN01", "SKU-100001", 10, false));
+                new AllocateRequest("ORD-REL-0003-1", "ICN01", "SKU-100001", 10, false));
         AllocationResult second = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-REL-0003-2", "ORD-REL-0003-2", "ICN01", "SKU-100001", 10, false));
+                new AllocateRequest("ORD-REL-0003-2", "ICN01", "SKU-100001", 10, false));
 
         allocationGateway.release("release:ORD-REL-0003", first.allocationIds());
 
@@ -84,7 +84,7 @@ class AllocationReleaseTest extends AbstractIntegrationTest {
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", 15)));
 
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-D03-0001-1", "ORD-D03-0001-1", "ICN01", "SKU-300001", 12, false));
+                new AllocateRequest("ORD-D03-0001-1", "ICN01", "SKU-300001", 12, false));
         assertThat(availableQty("ICN01", "A-02-01-1", "SKU-300001")).isEqualTo(3);
 
         // 할당분까지 조정으로 차감 시도 → 거절 (UC-D03b)

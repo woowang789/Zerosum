@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 물리 재고를 바꾸는 포스팅 쓰기 창구(입고·출고·이동·조정). 이 컨트롤러가 지키는 것 셋:
+ * 물리 재고를 바꾸는 포스팅 쓰기 창구(입고·출고·이동·조정). 이 컨트롤러가 지키는 것 넷:
  *
  * <ol>
  *   <li><b>멱등 키는 클라이언트가 보내지 않는다.</b> 발주라인·주문라인·이동/조정 참조 같은 업무 식별자를
@@ -31,6 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
  *       상대 줄은 거래 유형에 따라 이 컨트롤러가 채운다 — 그러지 않으면 복식부기 규칙이 클라이언트
  *       손에 넘어간다.</li>
  *   <li><b>행위자는 {@link Authentication}에서만 읽는다.</b> 요청 DTO에 actorId 필드를 두지 않는다.</li>
+ *   <li><b>입고·출고·이동의 수량은 양수다.</b> 상대 줄을 {@code -qty}/{@code +qty}로 만드는 이상 음수
+ *       qty는 거래의 방향을 통째로 뒤집는다 ({@link #requirePositiveQty}).</li>
  * </ol>
  *
  * <p>창고 범위는 {@code ?warehouse=} 쿼리 파라미터가 아니라 요청 본문의 {@code warehouseCode}이므로
@@ -64,6 +66,7 @@ public class PostingController {
         AccessGuard.requireAnyRole(authentication, "OPERATOR", "SUPERVISOR");
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
         requirePhysicalLocation(request.locationCode());
+        requirePositiveQty(request.qty());
 
         // 업무 식별자(발주라인:입고차수)에서 파생 — docs/04-write-path.md의 receipt:{발주라인}:{입고차수} 그대로.
         String idemKey = "receipt:%s:%d".formatted(request.poLineRef(), request.receiptSeq());
@@ -84,7 +87,10 @@ public class PostingController {
     public PostingResultResponse ship(@RequestBody ShipmentRequest request, Authentication authentication) {
         AccessGuard.requireAnyRole(authentication, "OPERATOR", "SUPERVISOR");
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
-        request.lines().forEach(line -> requirePhysicalLocation(line.locationCode()));
+        request.lines().forEach(line -> {
+            requirePhysicalLocation(line.locationCode());
+            requirePositiveQty(line.qty());
+        });
 
         // 업무 식별자(주문라인:출고차수)에서 파생 — docs/04-write-path.md의 ship:{주문라인}:{출고차수} 그대로.
         String idemKey = "shipment:%s:%d".formatted(request.orderLineRef(), request.shipmentSeq());
@@ -117,6 +123,7 @@ public class PostingController {
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
         requirePhysicalLocation(request.fromLocationCode());
         requirePhysicalLocation(request.toLocationCode());
+        requirePositiveQty(request.qty());
 
         // 업무 식별자(이동 참조)에서 파생 — 이동은 발주·주문 같은 상위 문서가 없을 수 있어 클라이언트가
         // 준 이동 참조(예: WMS 이동 작업 번호) 하나로 충분하다.
@@ -155,6 +162,19 @@ public class PostingController {
                         request.adjustmentRef(), request.reasonCode(), null, Instant.now(), List.of()),
                 Preconditions.none());
         return toResponse(outcome);
+    }
+
+    /**
+     * 입고·출고·이동은 양수 수량만 받는다. 이 컨트롤러가 클라이언트 qty로 {@code -qty}/{@code +qty} 줄을
+     * 만들기 때문에, qty가 음수면 부호가 통째로 뒤집혀 출고가 실재고를 늘리고 입고가 실재고를 없앤다.
+     * 코어의 가상 로케이션 규칙({@code PostingCommand#validate})이 같은 것을 한 겹 더 막지만, 이것은 요청
+     * 형태의 문제라 여기서 400으로 돌려준다. 조정에는 걸지 않는다 — 분실(음수)도 발견(양수)도 조정이고,
+     * 코어도 ADJUSTMENT만 부호를 자유로 둔다.
+     */
+    private static void requirePositiveQty(int qty) {
+        if (qty <= 0) {
+            throw new InvalidRequestException("NON_POSITIVE_QTY", "수량은 양수여야 한다: %d".formatted(qty));
+        }
     }
 
     private static void requirePhysicalLocation(String locationCode) {
