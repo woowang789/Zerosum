@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost } from '../api/client'
-import { useMe } from '../hooks/useMe'
-import { AiNote, ApiErrorMessage, ExpiryCountdown, formatDateTime, validBadge } from './shared'
+import { AiNote, ApiErrorMessage, ExpiryCountdown, formatDateTime, useWarehouseGate, validBadge } from './shared'
 
 interface PendingProposalRow {
   id: number
@@ -93,7 +92,7 @@ function describeApprovalOutcome(outcome: ApprovalOutcome): string {
 }
 
 export function ProposalsScreen() {
-  const { data: me } = useMe()
+  const { me, gate } = useWarehouseGate('제안 승인')
   const isSupervisor = me?.roles.includes('SUPERVISOR') ?? false
   const [warehouse, setWarehouse] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -109,6 +108,10 @@ export function ProposalsScreen() {
     queryFn: () => apiGet<PendingProposalRow[]>(`/api/proposals?warehouse=${encodeURIComponent(warehouse ?? '')}`),
     enabled: warehouse != null,
   })
+
+  if (me === null) {
+    return gate
+  }
 
   return (
     <div className="screen">

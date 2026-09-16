@@ -47,8 +47,8 @@ class IssueResolutionFlowTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 50)));
         long issueId = insertOpenIssue();
 
-        // ① AI 원인 분석: inventory_issue.ai_analysis에 원인 후보를 남긴다
-        aiAnalysisService.writeIssueAnalysis(issueId, "{\"cause\": \"실사 오차로 추정\"}");
+        // ① AI 원인 분석: inventory_issue.ai_analysis에 원인 후보를 남긴다 (자기 창고 이슈에만 쓸 수 있다)
+        aiAnalysisService.writeIssueAnalysis("ICN01", issueId, "{\"cause\": \"실사 오차로 추정\"}");
         assertThat(aiAnalysisJson(issueId)).contains("실사 오차로 추정");
 
         // ② AI 제안: 복구 커맨드를 action_proposal로 제안한다 (물리적 차이를 조정 거래로 반영)
@@ -132,10 +132,20 @@ class IssueResolutionFlowTest extends AbstractIntegrationTest {
 
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────────────
 
-    /** ReconciliationIssueLifecycleTest와 같은 기법: 배치와 무관하게 이슈 하나를 직접 만든다. */
+    /**
+     * ReconciliationIssueLifecycleTest와 같은 기법: 배치와 무관하게 이슈 하나를 직접 만든다.
+     *
+     * <p>location_id를 채운다 — 이슈가 창고에 매이는 유일한 길이고(inventory_issue → location →
+     * warehouse), AI 쓰기 표면 둘(write_issue_analysis·create_proposal의 issueId)이 그것으로 호출자
+     * 창고를 대조하기 때문이다. 실제로 이슈를 여는 경로도 전부 채운다(ReconciliationService 다섯 종류,
+     * CountResultRepository의 COUNT_VARIANCE) — 비워 두면 이 픽스처만 현실에 없는 모양이 된다.
+     */
     private long insertOpenIssue() {
         return jdbcClient.sql("""
-                INSERT INTO inventory_issue (issue_type, severity, detail) VALUES ('TEST_ISSUE', 'LOW', '{}'::JSONB)
+                INSERT INTO inventory_issue (issue_type, severity, location_id, detail)
+                SELECT 'TEST_ISSUE', 'LOW', l.id, '{}'::JSONB
+                FROM location l JOIN warehouse w ON w.id = l.warehouse_id
+                WHERE w.code = 'ICN01' AND l.code = 'A-01-01-1'
                 RETURNING id
                 """)
                 .query(Long.class)

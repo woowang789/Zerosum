@@ -92,7 +92,7 @@ class AiPermissionBoundaryTest extends AbstractIntegrationTest {
                 .single();
         reconciliationRepository.resolve(issueId, "user:test", null, "테스트로 종결");
 
-        assertThatThrownBy(() -> aiAnalysisService.writeIssueAnalysis(issueId, "{}"))
+        assertThatThrownBy(() -> aiAnalysisService.writeIssueAnalysis("ICN01", issueId, "{}"))
                 .isInstanceOf(IssueException.class);
 
         corruptOnHandQty("B-01-01-1", "SKU-100001", -3); // 원복
@@ -165,6 +165,53 @@ class AiPermissionBoundaryTest extends AbstractIntegrationTest {
 
         corruptOnHandQty("YIT01", "B-01-01-1", "SKU-100001", -3); // 원복
         assertReconciliationClean();
+    }
+
+    /**
+     * 분석 쓰기도 창고로 좁힌다 — 조회 도구 넷과 같은 규칙이다.
+     *
+     * <p>{@code write_issue_analysis}만 창고 범위를 강제하지 않아, ICN01 전용 MCP 서버가 YIT01 이슈의
+     * {@code ai_analysis}를 덮어쓸 수 있었다. DB 권한은 이것을 막아주지 않는다 — ai_proposer의
+     * {@code UPDATE (ai_analysis)}는 컬럼 단위이지 <b>행 단위</b>가 아니라서 어느 창고의 이슈든 같은
+     * 권한으로 열린다. 그래서 범위는 코어가 강제해야 한다.
+     *
+     * <p>피해는 조용하다: YIT01 담당자가 보는 원인 분석이 다른 창고 에이전트가 쓴 것으로 바뀌는데,
+     * 화면에는 "AI가 썼다"고만 나오지 어느 에이전트인지는 남지 않는다.
+     *
+     * <p>뒤쪽 절반(YIT01 권한으로는 실제로 쓰인다)이 없으면 앞의 거부 단언은 공허하다 — 이슈가
+     * 애초에 쓸 수 없는 상태였어도 똑같이 통과하기 때문이다.
+     */
+    @Test
+    void analysisWriteIsScopedToCallerWarehouse() {
+        postAndExpectSuccess(request("receipt:AI-BOUNDARY-ANALYSIS-YIT:1", "RECEIPT", null, null,
+                line("YIT01", "V-SUPPLIER", "SKU-100001", "DEFAULT", -10),
+                line("YIT01", "B-01-01-1", "SKU-100001", "DEFAULT", 10)));
+        corruptOnHandQty("YIT01", "B-01-01-1", "SKU-100001", 3);
+        assertThat(reconciliationService.runOnce()).isEqualTo(1);
+
+        long yitIssueId = jdbcClient.sql("SELECT id FROM inventory_issue WHERE issue_type = 'PROJECTION_MISMATCH'")
+                .query(Long.class)
+                .single();
+
+        assertThatThrownBy(() -> aiAnalysisService.writeIssueAnalysis("ICN01", yitIssueId, "{\"cause\":\"남의 창고\"}"))
+                .as("YIT01 이슈 id를 ICN01 권한으로 넘기면 거부한다")
+                .isInstanceOf(IssueException.class);
+        assertThat(aiAnalysisJson(yitIssueId)).as("거부됐으므로 컬럼은 손대지 않은 채다").isNull();
+
+        aiAnalysisService.writeIssueAnalysis("YIT01", yitIssueId, "{\"cause\":\"자기 창고\"}");
+        assertThat(aiAnalysisJson(yitIssueId)).as("같은 호출이 자기 창고로는 실제로 쓰인다").contains("자기 창고");
+
+        corruptOnHandQty("YIT01", "B-01-01-1", "SKU-100001", -3); // 원복
+        assertReconciliationClean();
+    }
+
+    /** 아직 아무것도 쓰이지 않았으면 널이다 — JdbcClient의 single()은 널 결과를 허용하지 않아 optional()로 받는다. */
+    private String aiAnalysisJson(long issueId) {
+        return jdbcClient.sql("SELECT ai_analysis::TEXT FROM inventory_issue WHERE id = :id")
+                .param("id", issueId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
     }
 
     private void assertPermissionDenied(String role, String sql) throws SQLException {

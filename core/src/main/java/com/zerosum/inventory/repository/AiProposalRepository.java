@@ -13,8 +13,8 @@ import org.springframework.stereotype.Repository;
 /**
  * ai_proposer 계정 전용 저장소. action_proposal INSERT·PENDING 조회와 inventory_issue.ai_analysis 기록을
  * 한다 — V4 마이그레이션의 컬럼 단위 GRANT(action_proposal: id, proposal_type, command_payload, status,
- * created_at, expires_at / inventory_issue: SELECT(id, status), UPDATE(ai_analysis))가 실제로 할 수 있는
- * 일의 전부다. primary(app_rw) JdbcClient가 아니라 {@code aiProposerJdbcClient}를 주입받아야 DB 권한 경계가
+ * created_at, expires_at / inventory_issue: SELECT(id, status), UPDATE(ai_analysis))와 뷰 SELECT
+ * (v_balance_basis·v_warehouse_sku_basis는 V4, v_issue_scope는 V6)가 실제로 할 수 있는 일의 전부다. primary(app_rw) JdbcClient가 아니라 {@code aiProposerJdbcClient}를 주입받아야 DB 권한 경계가
  * 앱 코드의 규율이 아니라 계정 자체로 지켜진다.
  *
  * <p>{@link #insertCanonical}과 {@link #findPending}은 같은 정규화(payload CTE)를 공유한다 — 엔트리 배열
@@ -132,18 +132,31 @@ public class AiProposalRepository {
      * ReconciliationRepository#resolve}와 같은 패턴으로 조건부 UPDATE의 영향 행 수로 판정한다.
      * status·acked_*는 컬럼 단위 GRANT가 애초에 SELECT·UPDATE 어느 쪽도 주지 않아 SQL에 넣을 수조차
      * 없다(V4) — 여기서 status를 WHERE에 쓸 수 있는 것도 (id, status) 컬럼 SELECT를 받았기 때문이다.
+     *
+     * <p>warehouseCode는 호출자가 밝히는 자기 창고다. 이것 없이는 ICN01 전용 MCP 서버가 YIT01 이슈의
+     * ai_analysis를 덮어쓴다 — 조회 도구 넷은 전부 창고로 좁히는데(AiQueryRepository) 이 쓰기만
+     * 빠져 있었다. 창고는 v_issue_scope(V6)로 대조한다: ai_proposer는 inventory_issue에서
+     * location_id를 읽을 수 없어 이 UPDATE 안에서 직접 조인할 수 없다.
+     *
+     * <p>범위 밖 이슈와 없는·닫힌 이슈를 같은 코드로 거절한다 — {@link AiQueryRepository#issue}가
+     * "다른 창고 이슈"를 "없다"와 똑같이 빈 Optional로 접는 것과 같은 선택이다. 코드를 갈라 놓으면
+     * 에이전트가 id를 훑어 남의 창고에 어떤 이슈가 열려 있는지 알아낼 수 있다.
      */
-    public void writeIssueAnalysis(long issueId, String analysisJson) {
+    public void writeIssueAnalysis(String warehouseCode, long issueId, String analysisJson) {
         int updated = jdbc.sql("""
                 UPDATE inventory_issue SET ai_analysis = CAST(:json AS JSONB)
                 WHERE id = :id AND status IN ('OPEN', 'ACKED')
+                  AND EXISTS (SELECT 1 FROM v_issue_scope s
+                              WHERE s.issue_id = :id AND s.warehouse_code = :warehouseCode)
                 """)
                 .param("json", analysisJson)
                 .param("id", issueId)
+                .param("warehouseCode", warehouseCode)
                 .update();
         if (updated != 1) {
             throw new IssueException("ISSUE_NOT_OPEN_OR_ACKED",
-                    "이슈 %d에는 분석을 쓸 수 없다(존재하지 않거나 이미 RESOLVED다)".formatted(issueId));
+                    "이슈 %d에는 분석을 쓸 수 없다(이 호출자 창고(%s)의 OPEN·ACKED 이슈가 아니다)"
+                            .formatted(issueId, warehouseCode));
         }
     }
 
@@ -186,15 +199,23 @@ public class AiProposalRepository {
     }
 
     /**
-     * issueId가 가리키는 이슈가 실제로 있고 OPEN·ACKED(봐야 할 이슈) 상태인지 — V4가 ai_proposer에 준
-     * {@code SELECT (id, status) ON inventory_issue} 권한만으로 답한다. 생성 단계 검증
-     * (ProposalCreationService)이 이 메서드로 존재하지 않거나 이미 닫힌 이슈를 가리키는 제안을 미리
-     * 거부한다 — 그 값을 무조건 믿고 승인 시점까지 넘기면, 승인 트랜잭션 안에서 이슈 종결이 실패할 때
-     * 재고 정정 자체가 롤백되는 문제로 이어진다(ProposalIssueLinkRobustnessTest).
+     * issueId가 가리키는 이슈가 <b>호출자 창고의</b> 이슈이면서 OPEN·ACKED(봐야 할 이슈) 상태인지.
+     * 생성 단계 검증(ProposalCreationService)이 이 메서드로 존재하지 않거나 이미 닫힌 이슈, 그리고
+     * 남의 창고 이슈를 가리키는 제안을 미리 거부한다 — 그 값을 무조건 믿고 승인 시점까지 넘기면,
+     * 승인 트랜잭션 안에서 이슈 종결이 실패할 때 재고 정정 자체가 롤백되거나(ProposalIssueLinkRobustnessTest)
+     * 승인 순간 남의 창고 이슈가 RESOLVED로 닫힌다.
+     *
+     * <p>상태와 창고를 v_issue_scope(V6) 한 곳에서 본다 — ai_proposer는 inventory_issue에서
+     * location_id를 읽을 수 없어(V4의 컬럼 단위 GRANT) 창고 조인을 이 SQL 안에서 할 수 없다.
      */
-    public boolean issueOpenOrAcked(long issueId) {
-        return jdbc.sql("SELECT EXISTS(SELECT 1 FROM inventory_issue WHERE id = :id AND status IN ('OPEN', 'ACKED'))")
+    public boolean issueOpenOrAckedInWarehouse(long issueId, String warehouseCode) {
+        return jdbc.sql("""
+                SELECT EXISTS(SELECT 1 FROM v_issue_scope
+                              WHERE issue_id = :id AND status IN ('OPEN', 'ACKED')
+                                AND warehouse_code = :warehouseCode)
+                """)
                 .param("id", issueId)
+                .param("warehouseCode", warehouseCode)
                 .query(Boolean.class)
                 .single();
     }

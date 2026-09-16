@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiDelete, apiPost } from '../api/client'
-import { useMe } from '../hooks/useMe'
-import { ApiErrorMessage } from './shared'
+import { ApiErrorMessage, useWarehouseGate } from './shared'
 
 // AllocationController.AllocationLine(:web) — 이 할당이 예약한 잔액 행. FEFO가 고른 순서 그대로 온다.
 interface AllocationLineResponse {
@@ -51,18 +50,11 @@ const ALLOC_STATUS_LABEL: Record<AllocationRecord['status'], string> = {
 const V_CUSTOMER = 'V-CUSTOMER'
 
 export function ShipmentScreen() {
-  const { data: me } = useMe()
+  const { me, gate } = useWarehouseGate('출고')
   const canWrite = me?.roles.some((r) => r === 'OPERATOR' || r === 'SUPERVISOR') ?? false
 
-  if (!me) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1>출고</h1>
-        </header>
-        <p className="state-message">불러오는 중…</p>
-      </div>
-    )
+  if (me === null) {
+    return gate
   }
 
   if (!canWrite) {
@@ -357,18 +349,27 @@ function ShipmentPanel({
     .map((l) => ({ ...l, qtyNum: Number(l.qty) || 0 }))
     .filter((l) => l.qtyNum > 0)
 
+  // 보낼 할당을 mutate()의 인자로 넘긴다. 소진 표시를 화면 상태(selectedAllocKeys)에서 다시 읽으면
+  // 안 되기 때문이다 — react-query는 mutationFn을 mutate() 시점의 렌더 값으로, onSuccess는 <b>응답이
+  // 돌아온 시점</b>의 최신 렌더 값으로 부른다. 요청이 나가 있는 동안 선택이 바뀌면 둘이 갈린다.
+  //
+  // 선택 집합 전체를 소진 표시하던 동안에는, 골랐다가 해제한 할당이 출고 성공 뒤 "해제됨"에서
+  // "출고로 소진됨"으로 바뀌었다. 출고 본문에는 ACTIVE만 실리므로 서버에는 여전히 풀린 예약인데
+  // 화면만 소진됐다고 말하는 꼴이다 — 이 화면은 할당 목록을 조회할 API가 없어 새로고침 말고는
+  // 서버의 진짜 상태를 다시 볼 방법도 없다.
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (sending: AllocationRecord[]) =>
       apiPost<PostingResultResponse>('/api/shipments', {
         orderLineRef,
         shipmentSeq: Number(shipmentSeq),
         warehouseCode,
         lines: parsedLines.map((l) => ({ locationCode: l.locationCode, skuCode: l.skuCode, lotNo: l.lotNo, qty: l.qtyNum })),
-        consumeAllocationIds,
+        // 보낸 id와 소진 표시할 키가 같은 sending에서 나온다 — 이 둘이 갈리지 않는 것이 요점이다.
+        consumeAllocationIds: sending.flatMap((a) => a.allocationIds),
       }),
-    onSuccess: (result) => {
+    onSuccess: (result, sending) => {
       setLastResult(result)
-      onConsumed([...selectedAllocKeys])
+      onConsumed(sending.map((a) => a.key))
       // 선택만 비우면 주문번호도 따라 비워진다 — 고른 예약에서 끌어오기 때문이다.
       setSelectedAllocKeys(new Set())
     },
@@ -377,7 +378,7 @@ function ShipmentPanel({
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setLastResult(null)
-    mutation.mutate()
+    mutation.mutate(selectedAllocations)
   }
 
   // 미리보기: 물리 줄은 입력한 그대로(음수), V-CUSTOMER 상대 줄은 (SKU,로트)별로 합쳐 하나씩 —

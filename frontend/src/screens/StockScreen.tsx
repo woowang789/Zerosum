@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet, ApiError } from '../api/client'
-import { useMe } from '../hooks/useMe'
+import { useWarehouseGate } from './shared'
 
 type LocationType = 'STORAGE' | 'RECEIVING' | 'RETURN_HOLD' | 'DAMAGED' | 'TRANSIT'
 
@@ -27,7 +27,7 @@ const LOCATION_TYPE_LABEL: Record<string, string> = {
 }
 
 export function StockScreen() {
-  const { data: me, isError: meFailed } = useMe()
+  const { me, gate } = useWarehouseGate('재고 현황')
   const [warehouse, setWarehouse] = useState<string | null>(null)
   const [skuInput, setSkuInput] = useState('')
   const [sku, setSku] = useState('')
@@ -55,31 +55,8 @@ export function StockScreen() {
   // me가 아직 없으면 창고를 고를 수 없고, 창고가 없으면 재고 쿼리도 시작되지 않는다(enabled).
   // 그 상태로 본문을 그리면 빈 드롭다운만 있는 화면이 되는데 — isLoading은 쿼리가 꺼져 있어
   // false다 — 재고 화면은 로그인 직후 첫 착지 화면이라 그 침묵이 곧 "앱이 고장났다"로 읽힌다.
-  // 다른 화면들(ReceiptScreen 등)과 같은 모양으로 게이트하되, 오류는 침묵시키지 않는다.
-  if (!me) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1>재고 현황</h1>
-        </header>
-        {meFailed ? (
-          <p className="state-message state-error">사용자 정보를 불러오지 못했다. 새로고침해 달라.</p>
-        ) : (
-          <p className="state-message">불러오는 중…</p>
-        )}
-      </div>
-    )
-  }
-
-  if (me.warehouses.length === 0) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1>재고 현황</h1>
-        </header>
-        <p className="state-message">접근할 수 있는 창고가 없다. 관리자에게 권한을 요청해 달라.</p>
-      </div>
-    )
+  if (me === null) {
+    return gate
   }
 
   return (

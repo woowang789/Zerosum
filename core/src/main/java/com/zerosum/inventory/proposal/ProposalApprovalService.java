@@ -88,9 +88,14 @@ public class ProposalApprovalService {
                 // 승인 시점에는 이미 다른 경로로 닫혀 있을 수 있고, 그렇다고 재고 정정(포스팅·markExecuted)
                 // 까지 롤백시키면 안 된다. 그래서 예외를 던지는 resolve() 대신 조용히 넘어가는
                 // resolveIfOpen()을 쓴다 — 사람이 직접 부르는 resolve()의 동작은 바뀌지 않는다.
+                // 이슈의 창고도 함께 대조한다. 생성 단계가 호출자 창고와 대조하지만 그것만으로는 경계가
+                // 아니다 — 이미 PENDING인 제안은 그 검사를 지나온 적이 없고, ai_proposer는
+                // action_proposal에 테이블 단위 INSERT 권한이 있어 MCP를 거치지 않고 직접 넣을 수도 있다.
+                // 어긋나면 조용히 안 닫는다(0행) — 재고 정정까지 롤백시키지는 않는다는 위의 결정과 같다.
                 if (proposal.issueId() != null) {
-                    reconciliationService.resolveIfOpen(proposal.issueId(), approver, posted.txnId(),
-                            "proposal:" + proposal.id());
+                    String warehouseCode = lines.get(0).warehouseCode();
+                    reconciliationService.resolveIfOpenInWarehouse(proposal.issueId(), warehouseCode, approver,
+                            posted.txnId(), "proposal:" + proposal.id());
                 }
                 yield new Executed(proposal.id(), posted.txnId());
             }

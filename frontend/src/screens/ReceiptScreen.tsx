@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiPost } from '../api/client'
-import { useMe } from '../hooks/useMe'
-import { ApiErrorMessage } from './shared'
+import { ApiErrorMessage, useWarehouseGate } from './shared'
 
 interface PostingResultResponse {
   txnId: number
@@ -13,18 +12,11 @@ interface PostingResultResponse {
 const V_SUPPLIER = 'V-SUPPLIER'
 
 export function ReceiptScreen() {
-  const { data: me } = useMe()
+  const { me, gate } = useWarehouseGate('입고')
   const canWrite = me?.roles.some((r) => r === 'OPERATOR' || r === 'SUPERVISOR') ?? false
 
-  if (!me) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1>입고</h1>
-        </header>
-        <p className="state-message">불러오는 중…</p>
-      </div>
-    )
+  if (me === null) {
+    return gate
   }
 
   if (!canWrite) {

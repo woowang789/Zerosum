@@ -99,10 +99,9 @@ function section(title: string): HTMLElement {
   return container
 }
 
-async function renderShipmentScreen(): Promise<UserEvent> {
-  // 화면만 떼어 그리므로 AuthProvider를 거치지 않는다 — 자격 증명은 직접 심는다. 할당·출고 폼은
-  // OPERATOR 이상에게만 보이므로 application.yml 기준 OPERATOR인 park.jh로 로그인한다.
-  setCredentials({ username: 'park.jh', password: 'zerosum' })
+/** 화면만 떼어 그린다 — AuthProvider를 거치지 않으므로 자격 증명은 직접 심는다. 기다리지 않는다. */
+function renderAs(username: string): UserEvent {
+  setCredentials({ username, password: 'zerosum' })
   const user = userEvent.setup()
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -112,6 +111,12 @@ async function renderShipmentScreen(): Promise<UserEvent> {
       <ShipmentScreen />
     </QueryClientProvider>,
   )
+  return user
+}
+
+async function renderShipmentScreen(): Promise<UserEvent> {
+  // 할당·출고 폼은 OPERATOR 이상에게만 보이므로 application.yml 기준 OPERATOR인 park.jh로 로그인한다.
+  const user = renderAs('park.jh')
   // /api/me가 오기 전에는 "불러오는 중…"뿐이다 — 폼이 그려질 때까지 기다린 뒤 돌려준다.
   await screen.findByRole('heading', { name: '1단계 — 할당 요청' })
   return user
@@ -598,4 +603,99 @@ it('주문번호는 고른 예약에서 끌어오고, 두 주문에 걸치면 �
   expect(field).toHaveValue('')
   expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
   expect(screen.getByText(/주문 줄 2개에 걸쳐 있다/)).toBeInTheDocument()
+})
+
+/**
+ * 해제한 할당은 출고가 성공해도 "해제됨"으로 남는다 — 화면이 서버와 다른 말을 하면 안 된다.
+ *
+ * <p>성공 처리가 <b>선택 집합 전체</b>를 소진 표시했다. 그런데 출고 본문에는 ACTIVE인 것만 실린다(바로
+ * 위 테스트가 지킨다). 그래서 골랐다가 해제한 할당은 서버에서는 여전히 풀린 예약인데 화면에서만
+ * "출고로 소진됨"으로 바뀌었다 — 재고가 틀어지지는 않지만, 이 화면은 할당 목록을 조회하는 API가 없어
+ * 새로고침 말고는 진짜 상태를 다시 볼 방법이 없다. 사용자는 화면을 믿을 수밖에 없고, 그 화면이 틀렸다.
+ *
+ * <p>본문을 함께 단언한다. 표시만 보면 "아무것도 소진 표시하지 않는" 구현으로도 통과하기 때문이다 —
+ * 실제로 보낸 22번이 "출고로 소진됨"이 되는 것까지 봐야 "보낸 것만 바꿨다"가 된다.
+ */
+it('해제한 할당은 출고 성공 뒤에도 해제됨으로 남는다', async () => {
+  const shipmentBodies: ShipmentBody[] = []
+
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-3001': {
+          allocationIds: [11],
+          lines: [
+            { allocationId: 11, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 5 },
+          ],
+        },
+        'SO-3002': {
+          allocationIds: [22],
+          lines: [
+            { allocationId: 22, locationCode: 'ICN01-B-02', skuCode: 'SKU-200002', lotNo: 'L20261120-C', qty: 4 },
+          ],
+        },
+      },
+      [],
+    ),
+    http.delete('*/api/allocations', ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      return new HttpResponse(null, { status: 204 })
+    }),
+    http.post('*/api/shipments', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      shipmentBodies.push((await request.json()) as ShipmentBody)
+      return HttpResponse.json({ txnId: 888 })
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-3001', 'SKU-200002', 5)
+  await allocate(user, 'SO-3002', 'SKU-200002', 4)
+
+  const panel = section('2단계 — 출고 확정')
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 11$/ }))
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 22$/ }))
+
+  // 고른 뒤 11번을 해제한다 — 선택 집합에는 키가 남아 있다.
+  const list = section('이번 세션에서 요청한 할당')
+  const releasedRow = within(list).getByRole('row', { name: /SO-3001/ })
+  await user.click(within(releasedRow).getByRole('button', { name: '할당 해제' }))
+  expect(await within(releasedRow).findByText('해제됨')).toBeInTheDocument()
+
+  await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
+  expect(await screen.findByText('출고가 확정됐다 — 거래 #888')).toBeInTheDocument()
+
+  // 보낸 것은 22번뿐이다.
+  expect(shipmentBodies).toEqual([
+    {
+      orderLineRef: 'SO-3002',
+      shipmentSeq: 1,
+      warehouseCode: WAREHOUSE,
+      lines: [{ locationCode: 'ICN01-B-02', skuCode: 'SKU-200002', lotNo: 'L20261120-C', qty: 4 }],
+      consumeAllocationIds: [22],
+    },
+  ])
+
+  // 그러므로 표시도 22번만 바뀐다. 11번은 서버에서 풀린 그대로다.
+  const shippedRow = within(section('이번 세션에서 요청한 할당')).getByRole('row', { name: /SO-3002/ })
+  expect(within(shippedRow).getByText('출고로 소진됨')).toBeInTheDocument()
+  const stillReleasedRow = within(section('이번 세션에서 요청한 할당')).getByRole('row', { name: /SO-3001/ })
+  expect(within(stillReleasedRow).getByText('해제됨')).toBeInTheDocument()
+})
+
+/**
+ * 창고 권한이 하나도 없는 사용자에게는 이유를 말한다.
+ *
+ * <p>출고 화면의 게이트는 "me 로딩 중" 하나뿐이었다 — 창고가 0개면 로딩은 끝났으므로 통과해, 선택지
+ * 0개짜리 창고 드롭다운이 달린 할당 폼이 그대로 떴다. 여기서 보는 것은 공용 게이트의 존재가 아니라
+ * <b>이 화면이 그것을 거친다</b>는 사실이다(다섯 화면이 빠뜨렸던 것이 그쪽이다).
+ */
+it('창고 권한이 없는 사용자에게는 이유를 말한다', async () => {
+  server.use(meHandler)
+
+  renderAs('jung.hs') // 가공 픽스처 — OPERATOR지만 창고 권한이 없다
+
+  expect(await screen.findByText(/접근할 수 있는 창고가 없다/)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: '1단계 — 할당 요청' })).not.toBeInTheDocument()
 })

@@ -106,3 +106,32 @@ it('제안을 승인하면 목록과 상세가 갱신된다', async () => {
   // 상태 배지가 승인 뒤에도 낡은 "대기"로 남는다.
   expect(await screen.findByText('실행됨')).toBeInTheDocument()
 })
+
+/**
+ * 창고 권한이 하나도 없는 사용자에게는 이유를 말한다.
+ *
+ * <p>승인 화면에는 게이트가 <b>아예 없었다</b>. 목록 쿼리는 {@code enabled: warehouse != null}이고 창고는
+ * {@code me.warehouses[0]}에서만 채워지므로, {@code /api/me}가 실패했거나 창고가 0개면 쿼리가 시작되지
+ * 않고 {@code isLoading}도 false다 — 선택지 0개짜리 드롭다운만 있고 "대기 중인 제안이 없다"조차
+ * 뜨지 않는 화면이 남았다(목록 data가 undefined라 표 자체를 그리지 않는다).
+ *
+ * <p>여기서 보는 것은 공용 게이트(useWarehouseGate)의 동작이 아니라 <b>이 화면이 그것을 거친다</b>는
+ * 사실이다 — 다섯 화면이 빠뜨렸던 것이 그쪽이다. 게이트의 세 상태 구분은 StockScreen·LedgerScreen
+ * 테스트가 본다.
+ */
+it('창고 권한이 없는 사용자에게는 이유를 말한다', async () => {
+  server.use(meHandler)
+
+  setCredentials({ username: 'jung.hs', password: 'zerosum' }) // 가공 픽스처 — 창고 권한이 없다
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ProposalsScreen />
+    </QueryClientProvider>,
+  )
+
+  expect(await screen.findByText(/접근할 수 있는 창고가 없다/)).toBeInTheDocument()
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+})
