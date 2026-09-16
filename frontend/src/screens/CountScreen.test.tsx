@@ -178,6 +178,41 @@ it('제출 결과에 resolutionTxnId가 있으면(CONFIRMED) 정정 없이 완�
 })
 
 /**
+ * 차이가 없어 정정 거래를 만들지 않은 확정({@code resolutionTxnId: null})도 확정이다.
+ *
+ * <p>화면은 {@code 'resolutionTxnId' in outcome}으로 판정한다 — 값이 아니라 <b>필드의 존재</b>를 본다.
+ * 그 형태여야 하는 이유가 바로 이 경우다. 실사 결과가 전산 수량과 정확히 같으면 서버는 정정 거래를
+ * 만들지 않고 {@code Confirmed(null)}을 내려주는데(`CountControllerTest`가 REVIEW는 필드 자체가 없음을,
+ * CONFIRMED는 있음을 못 박는다), 판정을 {@code outcome.resolutionTxnId != null}로 바꾸면 그 확정이
+ * REVIEW로 새어 <b>이미 잠금이 풀린 세션에 SUPERVISOR가 정정 승인을 누르게 된다</b>(서버는 거절한다).
+ *
+ * <p>위 두 테스트는 이 구분을 못 잡는다 — 한쪽은 필드가 없고 한쪽은 값이 있어서, {@code in}과 값 검사가
+ * 같은 답을 낸다. 값이 null인 이 세 번째 모양이 있어야 둘이 갈린다.
+ */
+it('차이가 없는 확정(resolutionTxnId가 null)도 정정 단계로 새지 않는다', async () => {
+  const SESSION_ID = 1
+  const submitBodies: SubmitBody[] = []
+
+  server.use(
+    meHandler,
+    stockHandler,
+    startHandler([SESSION_ID], []),
+    submitHandler(SESSION_ID, { resolutionTxnId: null }, submitBodies),
+  )
+
+  const user = await renderCountScreen()
+  await startSession(user)
+  await submitCount(user, SYSTEM_QTY) // 전산 수량과 같다 — 정정할 것이 없다
+
+  expect(await screen.findByText(/차이가 없었다/)).toBeInTheDocument()
+  expect(screen.queryByText(/허용 오차를 넘는 차이가 있어/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '정정 승인' })).not.toBeInTheDocument()
+  expect(submitBodies).toEqual([
+    { lines: [{ skuCode: 'SKU-200002', lotNo: 'L20260910-B', countedQty: SYSTEM_QTY }] },
+  ])
+})
+
+/**
  * 끝낸 뒤 같은 로케이션을 다시 실사할 수 있다 — 방금 코어에서 고친 결함의 화면 쪽 증거다.
  *
  * <p>순환 실사는 정기 업무라 한 로케이션을 몇 번이고 다시 센다. 예전에는 시작이 (창고, 로케이션)에서 멱등
@@ -229,4 +264,40 @@ it('포기한 뒤 같은 로케이션을 다시 시작하면 새 세션 id로 �
   ])
   expect(abandonedIds).toEqual(['1'])
   expect(submitBodies).toEqual([{ lines: [{ skuCode: 'SKU-200002', lotNo: 'L20260910-B', countedQty: SYSTEM_QTY }] }])
+})
+
+/**
+ * 정정 승인(POST /api/counts/{id}/resolve)이 실제로 나가고, 화면이 그 결과로 닫힌다.
+ *
+ * <p>이 화면의 유일한 SUPERVISOR 전용 쓰기인데 위 테스트들은 버튼이 <b>떠 있는지</b>까지만 본다 —
+ * 누르면 무엇이 나가는지, 응답을 어떻게 반영하는지는 아무도 지키지 않았다. 실사 정정은 원장에
+ * 조정 거래를 남기는 일이라(허용 오차를 넘은 차이를 사람이 승인해 확정한다) 조용히 안 나가거나
+ * 엉뚱한 세션으로 나가면 로케이션이 잠긴 채 남는다.
+ */
+it('정정 승인은 그 세션으로 나가고 결과가 화면에 반영된다', async () => {
+  const SESSION_ID = 7
+  const resolvedSessions: string[] = []
+
+  server.use(
+    meHandler,
+    stockHandler,
+    startHandler([SESSION_ID], []),
+    submitHandler(SESSION_ID, {}, []), // 빈 객체 = REVIEW, 정정 승인 버튼이 뜬다
+    http.post('*/api/counts/:id/resolve', ({ request, params }) => {
+      if (!authenticate(request)) return unauthorized()
+      resolvedSessions.push(String(params.id))
+      return HttpResponse.json({ resolutionTxnId: 4242 })
+    }),
+  )
+
+  const user = await renderCountScreen()
+  await startSession(user)
+  await submitCount(user, SYSTEM_QTY - 20) // 오차를 넘는 차이 → REVIEW
+
+  await user.click(await screen.findByRole('button', { name: '정정 승인' }))
+
+  expect(await screen.findByText(/정정 거래 #4242/)).toBeInTheDocument()
+  // 시작 때 서버가 준 세션으로 나가야 한다 — 다른 세션으로 나가면 서버가 거절하고 이 로케이션은 잠긴 채 남는다.
+  expect(resolvedSessions).toEqual([String(SESSION_ID)])
+  expect(screen.queryByRole('button', { name: '정정 승인' })).not.toBeInTheDocument()
 })

@@ -246,3 +246,21 @@ it('이슈를 종결하면 목록에서 빠지고 상세는 종결 정보를 보
 
   expect(resolveBodies).toEqual([{ note: NOTE, resolvedTxnId: 7 }])
 })
+
+/**
+ * 창고 권한이 하나도 없는 사용자에게는 이유를 말한다.
+ *
+ * <p>목록 쿼리는 {@code enabled: warehouse != null}이고 창고는 {@code me.warehouses[0]}에서만 채워진다 —
+ * 창고가 0개면 쿼리가 시작되지 않아 {@code isLoading}도 false고 {@code data}도 undefined다. 게이트가
+ * 없으면 선택지 0개짜리 드롭다운만 남아, 권한 문제인지 이슈가 없는 것인지 화면만 보고는 구분할 수 없다.
+ *
+ * <p>재고 화면이 같은 형태의 결함을 먼저 겪고 고쳤다({@code StockScreen.test.tsx}). 여섯 화면이 모두
+ * {@code useMe()}의 창고 목록으로 도는 이상 같은 자리가 여섯 번 있는 셈이라, 고친 자리마다 증거를 남긴다.
+ */
+it('창고 권한이 없는 사용자에게는 이유를 말한다', async () => {
+  server.use(meHandler)
+
+  await renderIssuesScreen('jung.hs') // 가공 픽스처 — 창고 권한이 없다
+
+  expect(await screen.findByText(/접근할 수 있는 창고가 없다/)).toBeInTheDocument()
+})

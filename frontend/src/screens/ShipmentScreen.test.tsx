@@ -23,7 +23,12 @@ import { ShipmentScreen } from './ShipmentScreen'
  * 줄을 돌려준다(수량을 로트 둘로 쪼개고 로케이션도 다르게 둔다). 화면이 FEFO를 다시 구현했거나 입력값에서
  * 줄을 만들어냈다면 그 모양이 나올 수 없다.
  *
- * <p>요청 횟수는 세지 않는다. 값이 있는 것은 <b>보낸 본문</b>이고, 모아서 전부 검사한다.
+ * <p>단언하는 것은 <b>보낸 본문</b>이다. 본문을 배열로 모아 통째로 비교하므로 개수도 함께 고정되지만,
+ * 그건 부수 효과지 목적이 아니다 — 값이 있는 것은 무엇을 보냈는가다.
+ *
+ * <p>버튼 한 번에 요청 하나가 나가는 자리들이라 이 형태가 경합이 되지 않는다. 화면이 같은 엔드포인트를
+ * 스스로 두 번 부를 수 있는 자리(로그인이 /api/me를 부르고 useMe가 또 부르는 것처럼)였다면 개수를
+ * 고정하는 순간 플레이크가 된다 — 실제로 그렇게 물린 적이 있다.
  */
 
 const WAREHOUSE = 'ICN01' // park.jh(OPERATOR)의 유일한 창고 — 두 폼이 기본으로 고르는 값과 같아야 한다.
@@ -305,4 +310,234 @@ it('할당 해제는 그 줄의 할당 id만 보낸다', async () => {
 
   expect(allocateBodies.map((b) => b.orderLineRef)).toEqual(['SO-1001', 'SO-1002'])
   expect(releaseBodies).toEqual([{ allocationIds: [11] }])
+})
+
+/**
+ * 고른 뒤 해제한 할당은 출고 본문에 실리지 않는다.
+ *
+ * <p>후보 목록은 `status === 'active'`로 걸러 그리는데 선택 집합은 key만 들고 있었다. 그래서 체크한
+ * 할당을 해제하면 체크박스가 목록에서 사라져 <b>선택을 되돌릴 수단이 없는 채로</b> 그 할당 id가
+ * 출고 본문에 그대로 실려 나갔다 — 서버에서 예약이 이미 풀린 할당을 소진하겠다고 보내는 꼴이다.
+ * 서버는 `ALLOC_NOT_ACTIVE`로 거절하니 재고가 틀어지지는 않지만, 사용자는 새로고침 말고는
+ * 빠져나올 길이 없다(할당 목록은 조회 API가 없어 새로고침하면 통째로 사라진다).
+ *
+ * <p>고르는 것과 가지고 있는 것을 혼동하지 않는다는 앞 테스트와는 다른 축이다 — 여기서 보는 것은
+ * 골라 둔 것이 <b>그 뒤에 무효가 됐을 때</b>다.
+ */
+it('고른 뒤 해제한 할당은 출고 본문에 실리지 않는다', async () => {
+  const shipmentBodies: ShipmentBody[] = []
+  const releaseBodies: ReleaseBody[] = []
+
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-2001': {
+          allocationIds: [11],
+          lines: [
+            { allocationId: 11, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 5 },
+          ],
+        },
+        'SO-2002': {
+          allocationIds: [22],
+          lines: [
+            { allocationId: 22, locationCode: 'ICN01-B-02', skuCode: 'SKU-200002', lotNo: 'L20261120-C', qty: 4 },
+          ],
+        },
+      },
+      [],
+    ),
+    http.delete('*/api/allocations', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      releaseBodies.push((await request.json()) as ReleaseBody)
+      return new HttpResponse(null, { status: 204 })
+    }),
+    http.post('*/api/shipments', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      shipmentBodies.push((await request.json()) as ShipmentBody)
+      return HttpResponse.json({ txnId: 777 })
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-2001', 'SKU-200002', 5)
+  await allocate(user, 'SO-2002', 'SKU-200002', 4)
+
+  // 둘 다 고른다.
+  const panel = section('2단계 — 출고 확정')
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 11$/ }))
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 22$/ }))
+
+  // 그중 하나를 해제한다.
+  const list = section('이번 세션에서 요청한 할당')
+  const row = within(list).getByRole('row', { name: /SO-2001/ })
+  await user.click(within(row).getByRole('button', { name: '할당 해제' }))
+  expect(await within(row).findByText('해제됨')).toBeInTheDocument()
+  expect(releaseBodies).toEqual([{ allocationIds: [11] }])
+
+  await user.type(within(panel).getByLabelText('주문번호(orderLineRef)'), 'SO-2002')
+  await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
+
+  expect(await screen.findByText('출고가 확정됐다 — 거래 #777')).toBeInTheDocument()
+  // 해제한 11번은 id도 물리 줄도 나가지 않는다.
+  expect(shipmentBodies).toEqual([
+    {
+      orderLineRef: 'SO-2002',
+      shipmentSeq: 1,
+      warehouseCode: WAREHOUSE,
+      lines: [{ locationCode: 'ICN01-B-02', skuCode: 'SKU-200002', lotNo: 'L20261120-C', qty: 4 }],
+      consumeAllocationIds: [22],
+    },
+  ])
+})
+
+/**
+ * 같은 주문번호로 두 번 할당해도 목록은 한 줄이고, 같은 재고가 두 번 출고되지 않는다.
+ *
+ * <p>할당은 `orderLineRef`로 멱등이다 — 같은 주문번호를 다시 보내면 서버는 새 예약을 만들지 않고
+ * <b>같은 할당 id</b>를 돌려준다. 그런데 화면이 줄의 key를 시계(`Date.now()`)로 만들던 동안에는
+ * 그때마다 새 줄이 생겨 같은 예약이 목록에 두 벌 쌓였고, 둘 다 고르면 같은 물리 줄이 출고 본문에
+ * 두 번 실렸다. 화면에는 예약이 두 개로 보이는데 서버에는 하나뿐이다.
+ *
+ * <p>key를 할당 id에서 만들면 두 번째 응답이 첫 줄을 덮는다.
+ */
+it('같은 주문번호로 두 번 할당해도 줄이 늘지 않는다', async () => {
+  const shipmentBodies: ShipmentBody[] = []
+
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        // 멱등이므로 두 번째 요청도 같은 id·같은 줄을 돌려준다.
+        'SO-3001': {
+          allocationIds: [33],
+          lines: [
+            { allocationId: 33, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 6 },
+          ],
+        },
+      },
+      [],
+    ),
+    http.post('*/api/shipments', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      shipmentBodies.push((await request.json()) as ShipmentBody)
+      return HttpResponse.json({ txnId: 888 })
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-3001', 'SKU-200002', 6)
+  await allocate(user, 'SO-3001', 'SKU-200002', 6)
+
+  const list = section('이번 세션에서 요청한 할당')
+  expect(within(list).getAllByRole('row', { name: /SO-3001/ })).toHaveLength(1)
+
+  const panel = section('2단계 — 출고 확정')
+  expect(within(panel).getAllByRole('checkbox', { name: /ID 33$/ })).toHaveLength(1)
+
+  await confirmShipment(user, 'SO-3001', ['33'])
+  expect(await screen.findByText('출고가 확정됐다 — 거래 #888')).toBeInTheDocument()
+  expect(shipmentBodies).toEqual([
+    {
+      orderLineRef: 'SO-3001',
+      shipmentSeq: 1,
+      warehouseCode: WAREHOUSE,
+      lines: [{ locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 6 }],
+      consumeAllocationIds: [33],
+    },
+  ])
+})
+
+/**
+ * 출고 차수와 allowInCount가 입력한 대로 나간다.
+ *
+ * <p>둘 다 기본값으로만 시험되면 화면이 값을 무시하고 상수를 보내도 드러나지 않는다. 출고 차수는
+ * 멱등 키의 절반(`shipment:{orderLineRef}:{shipmentSeq}`)이라 1로 고정되면 <b>부분 출고 2차가
+ * 1차의 재생이 되어 조용히 아무 거래도 생기지 않는다</b> — 화면은 성공으로 보인다.
+ * allowInCount는 실사 중인 로케이션 재고를 끌어갈지 여부라 화면 자신이 위험을 경고하는 필드다.
+ */
+it('출고 차수와 allowInCount가 입력한 대로 나간다', async () => {
+  const allocateBodies: AllocateBody[] = []
+  const shipmentBodies: ShipmentBody[] = []
+
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-4001': {
+          allocationIds: [44],
+          lines: [
+            { allocationId: 44, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 2 },
+          ],
+        },
+      },
+      allocateBodies,
+    ),
+    http.post('*/api/shipments', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      shipmentBodies.push((await request.json()) as ShipmentBody)
+      return HttpResponse.json({ txnId: 999 })
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+
+  const form = section('1단계 — 할당 요청')
+  await user.click(within(form).getByRole('checkbox', { name: /allowInCount/ }))
+  await allocate(user, 'SO-4001', 'SKU-200002', 2)
+
+  const panel = section('2단계 — 출고 확정')
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 44$/ }))
+  const seq = within(panel).getByLabelText('출고 차수(shipmentSeq)')
+  await user.clear(seq)
+  await user.type(seq, '3')
+  await user.type(within(panel).getByLabelText('주문번호(orderLineRef)'), 'SO-4001')
+  await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
+
+  expect(await screen.findByText('출고가 확정됐다 — 거래 #999')).toBeInTheDocument()
+  expect(allocateBodies).toEqual([
+    { orderLineRef: 'SO-4001', warehouseCode: WAREHOUSE, skuCode: 'SKU-200002', qty: 2, allowInCount: true },
+  ])
+  expect(shipmentBodies[0].shipmentSeq).toBe(3)
+})
+
+/**
+ * 서버가 출고를 거절하면 그 이유가 화면에 뜬다.
+ *
+ * <p>쓰기 화면의 절반은 거절당하는 경로다. 재고가 모자라거나(INSUFFICIENT_STOCK) 할당과 물리 줄이
+ * 어긋나면(ORPHAN_CONSUME) 서버가 막는데, 화면이 그 메시지를 삼키면 사용자는 버튼을 눌렀는데
+ * 아무 일도 안 일어난 것으로 본다 — 그리고 다시 누른다. 성공 경로만 시험하면 오류 표시를 통째로
+ * 지워도 테스트가 전부 초록불이다.
+ *
+ * <p>확정 문구가 뜨지 않는 것도 함께 본다. 거절됐는데 성공으로 보이는 것이 더 나쁘다.
+ */
+it('서버가 출고를 거절하면 그 이유가 화면에 뜬다', async () => {
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-5001': {
+          allocationIds: [55],
+          lines: [
+            { allocationId: 55, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 9 },
+          ],
+        },
+      },
+      [],
+    ),
+    http.post('*/api/shipments', ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      return HttpResponse.json(
+        { code: 'ORPHAN_CONSUME', message: '소진하려는 할당의 잔액 행이 출고 줄에 없다' },
+        { status: 409 },
+      )
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-5001', 'SKU-200002', 9)
+  await confirmShipment(user, 'SO-5001', ['55'])
+
+  expect(await screen.findByText('소진하려는 할당의 잔액 행이 출고 줄에 없다')).toBeInTheDocument()
+  expect(screen.queryByText(/출고가 확정됐다/)).not.toBeInTheDocument()
 })

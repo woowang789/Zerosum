@@ -84,7 +84,8 @@ function ShipmentWorkspace({ warehouses }: { warehouses: string[] }) {
   const [allocations, setAllocations] = useState<AllocationRecord[]>([])
 
   function handleAllocated(record: AllocationRecord) {
-    setAllocations((prev) => [record, ...prev])
+    // 같은 키(= 같은 서버 할당)가 이미 있으면 덮어쓴다. 멱등 재할당이 줄을 늘리지 않게 한다.
+    setAllocations((prev) => [record, ...prev.filter((a) => a.key !== record.key)])
   }
 
   function handleReleased(key: string) {
@@ -151,7 +152,10 @@ function AllocationForm({
       }),
     onSuccess: (result) => {
       onAllocated({
-        key: `${Date.now()}:${orderLineRef}`,
+        // 서버 할당 id로 키를 만든다. 할당은 orderLineRef로 멱등이라 같은 주문번호를 다시 보내면
+        // 같은 id가 돌아오는데, 시계로 키를 만들면 그때마다 새 줄이 생겨 같은 예약이 목록에 두 벌
+        // 쌓인다 — 둘 다 고르면 같은 물리 줄이 출고 본문에 두 번 실린다.
+        key: result.allocationIds.join(','),
         orderLineRef,
         warehouseCode,
         skuCode,
@@ -334,7 +338,11 @@ function ShipmentPanel({
     })
   }
 
-  const selectedAllocations = allocations.filter((a) => selectedAllocKeys.has(a.key))
+  // status를 함께 본다. 후보 목록(activeAllocations)은 이미 걸러 그리지만 선택 집합은 key만 들고
+  // 있어서, 고른 뒤 그 할당을 해제하면 체크박스가 사라져 되돌릴 수단이 없는 채로 출고 본문에는
+  // 그대로 실려 나갔다 — 서버에서 예약이 풀린 할당을 소진하겠다고 보내는 꼴이라 ALLOC_NOT_ACTIVE로
+  // 거절되고, 사용자는 새로고침 말고는 빠져나올 길이 없었다.
+  const selectedAllocations = allocations.filter((a) => a.status === 'active' && selectedAllocKeys.has(a.key))
   const consumeAllocationIds = selectedAllocations.flatMap((a) => a.allocationIds)
   // 출고 줄은 사용자가 입력하지 않는다 — 소진할 할당을 고르면 그 할당이 예약한 물리 줄(서버가 FEFO로
   // 고른 로케이션·로트·수량)을 그대로 쓴다. 그래서 물리 줄이 할당과 어긋날 일이 없다(ORPHAN_CONSUME 방지).
