@@ -47,6 +47,29 @@ public class AllocationRepository {
         return inserted > 0;
     }
 
+    /**
+     * 이 주문 줄에서 이미 닫힌 할당 회차의 수. 멱등 키 {@code allocate:{주문줄}:{회차}}의 회차가 된다
+     * (AllocationService#allocate 주석).
+     *
+     * <p>회차는 allocation 행 수가 아니라 <b>idem_key로 묶은 회차</b> 단위로 센다. 한 번의 할당이 FEFO로
+     * 여러 로트에 걸쳐 행을 여럿 만들고, 그 중 일부만 먼저 닫히는 일(부분 소진)이 있기 때문이다. 행을 세면
+     * 그 사이의 재시도가 새 회차로 넘어가 예약이 두 번 잡힌다. ACTIVE가 하나도 남지 않은 회차만 닫힌 것으로
+     * 본다 — 그래서 어느 한 행이라도 ACTIVE인 동안에는 회차가 그대로고, 재시도는 같은 키로 재생된다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int closedRoundCount(String orderLineRef) {
+        return jdbc.sql("""
+                SELECT count(*)::INT FROM (
+                  SELECT idem_key FROM allocation WHERE order_line_ref = :ref
+                  GROUP BY idem_key
+                  HAVING count(*) FILTER (WHERE status = 'ACTIVE') = 0
+                ) closed_rounds
+                """)
+                .param("ref", orderLineRef)
+                .query(Integer.class)
+                .single();
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public String storedRequestHash(String idemKey) {
         return jdbc.sql("SELECT request_hash FROM idempotency_record WHERE idem_key = :idemKey")

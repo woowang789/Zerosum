@@ -41,12 +41,12 @@ class SellableStockAndAllocationTest extends AbstractIntegrationTest {
         assertThat(stock.inCountQty()).as("실사 중인 A-01-01-1의 52개는 분리 표기").isEqualTo(52);
 
         assertThatThrownBy(() -> allocationGateway.allocate(
-                new AllocateRequest("alloc:CC-SELL-0001", "ORD-CC-SELL-0001", "ICN01", "SKU-100001", 30, false)))
+                new AllocateRequest("ORD-CC-SELL-0001", "ICN01", "SKU-100001", 30, false)))
                 .as("allowInCount=false면 실사 중 로케이션은 후보에서 빠져 24개뿐이라 부족하다")
                 .isInstanceOf(InsufficientStockException.class);
 
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:CC-SELL-0002", "ORD-CC-SELL-0002", "ICN01", "SKU-100001", 30, true));
+                new AllocateRequest("ORD-CC-SELL-0002", "ICN01", "SKU-100001", 30, true));
         assertThat(result.allocationIds()).as("allowInCount=true면 실사 중 로케이션도 후보에 포함된다").isNotEmpty();
 
         // 정리: 할당 해제 후 실사 중단 (해제 없이 중단하면 I5가 깨진 채 남는 게 아니라, 실사 중단 자체는

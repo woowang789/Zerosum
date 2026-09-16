@@ -43,7 +43,7 @@ class ShipmentTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-02-1", "SKU-200002", "L20260901-A", 50)));
 
         AllocationResult allocated = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-SHIP-0001-1", "ORD-SHIP-0001-1", "ICN01", "SKU-200002", 60, false));
+                new AllocateRequest("ORD-SHIP-0001-1", "ICN01", "SKU-200002", 60, false));
 
         postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-0001-1:1", "ORD-SHIP-0001-1", allocationIdValues(allocated),
                 line("ICN01", "A-01-02-1", "SKU-200002", "L20260901-A", -50),
@@ -71,7 +71,7 @@ class ShipmentTest extends AbstractIntegrationTest {
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", 20)));
 
         AllocationResult allocated = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-SHIP-D14-1", "ORD-SHIP-D14-1", "ICN01", "SKU-300001", 15, false));
+                new AllocateRequest("ORD-SHIP-D14-1", "ICN01", "SKU-300001", 15, false));
         postAndExpectSuccess(shipmentRequest("ship:ORD-SHIP-D14-1:1", "ORD-SHIP-D14-1", allocationIdValues(allocated),
                 line("ICN01", "A-02-01-1", "SKU-300001", "DEFAULT", -15),
                 line("ICN01", "V-CUSTOMER", "SKU-300001", "DEFAULT", 15)));
@@ -94,7 +94,7 @@ class ShipmentTest extends AbstractIntegrationTest {
                 line("ICN01", "V-SUPPLIER", "SKU-100001", "DEFAULT", -50),
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 50)));
         AllocationResult allocated = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-SHIP-CONC-1", "ORD-SHIP-CONC-1", "ICN01", "SKU-100001", 50, false));
+                new AllocateRequest("ORD-SHIP-CONC-1", "ICN01", "SKU-100001", 50, false));
 
         PostingRequest shipment = shipmentRequest("ship:ORD-SHIP-CONC-1:1", "ORD-SHIP-CONC-1", allocationIdValues(allocated),
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", -50),

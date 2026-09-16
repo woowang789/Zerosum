@@ -58,6 +58,41 @@ class PostingControllerTest extends AbstractWebTest {
                 .andExpect(jsonPath("$.code").value("VIRTUAL_LOCATION_NOT_ALLOWED"));
     }
 
+    /**
+     * 음수 수량은 거래의 방향을 통째로 뒤집는다 — 출고인데 물리 줄이 +50, V-CUSTOMER가 -50이 되어
+     * txn_type=SHIPMENT·reason_code=NULL인 거래가 실재고를 늘린다. 원장과 잔액이 완벽히 일치하므로
+     * 정합 검증 ①~⑤는 이것을 영원히 보지 못한다. 컨트롤러가 요청 형태로 먼저 막고, 코어의 가상
+     * 로케이션 규칙이 한 겹 더 막는다 (core VirtualLocationRuleTest).
+     */
+    @Test
+    void negativeShipmentQtyIsRejected() throws Exception {
+        mockMvc.perform(post("/api/shipments").with(httpBasic("park.jh", PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"orderLineRef":"ORD-NEG-1","shipmentSeq":1,"warehouseCode":"ICN01",
+                                 "lines":[{"locationCode":"A-01-01-1","skuCode":"SKU-100001",
+                                           "lotNo":"DEFAULT","qty":-50}]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("NON_POSITIVE_QTY"));
+
+        // 거절은 컨트롤러에서 끝나므로 거래도, 그 거래가 태울 뻔한 멱등 키도 남지 않는다.
+        assertThat(txnCountForIdemKey("shipment:ORD-NEG-1:1")).isZero();
+    }
+
+    @Test
+    void negativeReceiptQtyIsRejected() throws Exception {
+        receive("PO-NEG-1", 1, "ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 20, "park.jh");
+
+        mockMvc.perform(post("/api/receipts").with(httpBasic("park.jh", PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(receiptJson("PO-NEG-2", 1, "ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", -20)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("NON_POSITIVE_QTY"));
+
+        assertThat(onHandQty("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT")).isEqualTo(20);
+    }
+
     @Test
     void duplicateReceiptIsIdempotent() throws Exception {
         long first = receive("PO-3", 1, "ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 12, "park.jh");

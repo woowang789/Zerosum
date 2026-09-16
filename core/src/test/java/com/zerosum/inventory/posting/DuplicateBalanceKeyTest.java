@@ -35,10 +35,13 @@ class DuplicateBalanceKeyTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("같은 키에 증가와 차감이 섞여도 순서대로 누적 적용되고 on_hand_after가 각 줄 직후 값이다")
     void 같은_잔액_키에_증가와_차감이_섞인_거래() {
-        // V-SUPPLIER(-5) -> RCV-01(+20) -> RCV-01(-15) : (SKU, 로트) 합계는 -5+20-15=0으로 유효하다.
+        // V-ADJUST(-5) -> RCV-01(+20) -> RCV-01(-15) : (SKU, 로트) 합계는 -5+20-15=0으로 유효하다.
         // 두 번째 RCV-01 줄은 첫 번째 줄이 만든 잔액(20)을 기준으로 가용을 평가해야 한다.
-        long txnId = postAndExpectSuccess(request("receipt:DUP-0002", "RECEIPT", null, null,
-                line("ICN01", "V-SUPPLIER", "SKU-100001", "DEFAULT", -5),
+        // 부호가 섞인 이 모양은 조정으로만 만들 수 있다 — 입고의 물리 줄은 양수여야 하고(가상 로케이션
+        // 규칙, PostingCommand#validate) 부호가 자유로운 거래 유형은 ADJUSTMENT뿐이다. 이 테스트가 보는
+        // 것은 거래 유형이 아니라 "같은 잔액 키의 여러 줄이 누적 적용되는가"이므로 유형만 바꿔 옮겼다.
+        long txnId = postAndExpectSuccess(request("adjust:DUP-0002", "ADJUSTMENT", "CYCLE_COUNT", null,
+                line("ICN01", "V-ADJUST", "SKU-100001", "DEFAULT", -5),
                 line("ICN01", "RCV-01", "SKU-100001", "DEFAULT", 20),
                 line("ICN01", "RCV-01", "SKU-100001", "DEFAULT", -15)));
 

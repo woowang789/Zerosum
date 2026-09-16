@@ -27,7 +27,7 @@ class AllocationFefoTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-02-1", "SKU-200002", "L20260901-A", 50)));
 
         AllocationResult result = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-FEFO-0001-1", "ORD-FEFO-0001-1", "ICN01", "SKU-200002", 60, false));
+                new AllocateRequest("ORD-FEFO-0001-1", "ICN01", "SKU-200002", 60, false));
 
         assertThat(result.allocationIds()).hasSize(2);
         assertThat(allocatedQty("ICN01", "A-01-02-1", "SKU-200002", "L20260901-A"))
@@ -45,7 +45,7 @@ class AllocationFefoTest extends AbstractIntegrationTest {
                 line("ICN01", "A-01-01-1", "SKU-100001", "DEFAULT", 10)));
 
         assertThatThrownBy(() -> allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-FEFO-0002-1", "ORD-FEFO-0002-1", "ICN01", "SKU-100001", 11, false)))
+                new AllocateRequest("ORD-FEFO-0002-1", "ICN01", "SKU-100001", 11, false)))
                 .isInstanceOf(InsufficientStockException.class)
                 .extracting(ex -> ((AllocationException) ex).code())
                 .isEqualTo("INSUFFICIENT_STOCK");

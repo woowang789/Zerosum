@@ -16,8 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 할당·할당 해제 창구. 둘 다 OPERATOR 이상. 멱등 키는 클라이언트가 보내지 않는다 — 생성은 요청의
- * {@code orderLineRef}(업무 식별자)에서, 해제는 대상 할당 id 집합 자체에서 서버가 파생한다.
+ * 할당·할당 해제 창구. 둘 다 OPERATOR 이상. 멱등 키는 클라이언트가 보내지 않는다 — 해제는 대상 할당 id
+ * 집합 자체에서 이 컨트롤러가 파생하고, 생성은 {@code allocate:{주문줄}:{회차}}의 회차를 트랜잭션 안에서
+ * 세어야 해서 코어({@code AllocationService#allocate})가 파생한다.
  *
  * <p>생성은 요청 본문의 {@code warehouseCode}를 바로 검증하면 되지만, 해제는 할당 id만 받으므로
  * {@link com.zerosum.inventory.web.issue.IssueController}의 {@code {id}} 엔드포인트와 같은 패턴으로
@@ -40,9 +41,7 @@ public class AllocationController {
         AccessGuard.requireAnyRole(authentication, "OPERATOR", "SUPERVISOR");
         AccessGuard.requireWarehouse(authentication, request.warehouseCode());
 
-        // 업무 식별자(주문라인)에서 파생 — 같은 주문라인을 다시 보내면 새 할당이 아니라 기존 결과를 돌려준다.
-        String idemKey = "allocate:%s".formatted(request.orderLineRef());
-        AllocationResult result = allocationGateway.allocate(new AllocateRequest(idemKey, request.orderLineRef(),
+        AllocationResult result = allocationGateway.allocate(new AllocateRequest(request.orderLineRef(),
                 request.warehouseCode(), request.skuCode(), request.qty(), request.allowInCount()));
         List<Long> allocationIds = result.allocationIds().stream().map(AllocationId::value).toList();
         List<AllocationLine> lines = allocationLookupRepo.linesOf(allocationIds).stream()

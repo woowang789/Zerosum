@@ -32,7 +32,7 @@ class OrphanConsumeTest extends AbstractIntegrationTest {
 
         // FEFO는 만료가 같으면 잔액 행 id 순 → A-01-01-1에 할당이 붙는다
         AllocationResult allocated = allocationGateway.allocate(
-                new AllocateRequest("alloc:ORD-ORPHAN-1", "ORD-ORPHAN-1", "ICN01", "SKU-100001", 8, false));
+                new AllocateRequest("ORD-ORPHAN-1", "ICN01", "SKU-100001", 8, false));
         List<Long> allocIds = allocated.allocationIds().stream().map(id -> id.value()).toList();
 
         // B-01-01-1에서 출고하면서 A-01-01-1에 붙은 할당을 소진 대상으로 넘긴다 (호출자 버그) → 거절돼야 한다
