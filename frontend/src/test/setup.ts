@@ -26,7 +26,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  expect(unhandledRequests, `처리되지 않은 요청: ${unhandledRequests.join(', ') || '없음'}`).toEqual([])
+  // 단언보다 정리를 먼저 한다. 미처리 요청 단언이 터지면 이 뒤의 정리가 통째로 건너뛰어져
+  // 핸들러·자격 증명·주소가 다음 테스트로 새고, 그러면 한 테스트의 실패가 뒤 테스트들을 엉뚱하게
+  // 무너뜨려 진짜 원인 자리를 가린다. 단언은 정리를 다 끝낸 뒤 맨 마지막에 한다.
+  const unhandled = [...unhandledRequests]
   server.resetHandlers()
   server.events.removeAllListeners()
   // api/client.ts의 자격 증명은 모듈 변수 + sessionStorage다. 테스트 파일 하나 안에서는 모듈이
@@ -38,6 +41,8 @@ afterEach(() => {
   // 주소도 되돌린다. BrowserRouter가 jsdom의 history를 실제로 밀기 때문에, 앞 테스트에서 이동한
   // 경로가 남으면 다음 테스트가 기본 화면(/stock)이 아닌 곳에서 시작한다.
   window.history.replaceState(null, '', '/')
+
+  expect(unhandled, `처리되지 않은 요청: ${unhandled.join(', ') || '없음'}`).toEqual([])
 })
 
 afterAll(() => server.close())

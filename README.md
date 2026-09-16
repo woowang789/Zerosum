@@ -22,7 +22,7 @@
 
 | 증거 | 수치 |
 |---|---|
-| 테스트 | **294건 PASS** (core 226 / web 49 / 프론트 16 / mcp-server 3), 실패·에러 0 |
+| 테스트 | **309건 PASS** (core 226 / web 49 / 프론트 31 / mcp-server 3), 실패·에러 0 |
 | 스키마 하네스 (PL/pgSQL) | **191건 PASS** |
 | 속성 기반 시퀀스 | **4,400 연산**을 무작위로 섞어 실행, 매 단계 정합 검증 0건 |
 | 테스트 DB | Testcontainers PostgreSQL 16 (H2 아님 — 행 잠금과 지연 제약이 달라 증거가 되지 못한다) |
@@ -132,7 +132,7 @@ GRANT UPDATE (ai_analysis) ON inventory_issue TO ai_proposer;
 
 응답 형태가 어긋나는 문제는 백엔드 쪽 테스트가 지킨다(`AllocationLinesTest`, `StockVisibilityTest`). 그 종류는 프론트에서 mock으로는 잡을 수 없다 — 내가 쓴 mock으로 내 가정을 확인할 뿐이기 때문이다. 그래서 E2E는 두지 않았다.
 
-Vitest + Testing Library + MSW로 16건. 각 테스트는 자기가 잡겠다는 버그를 되살려 실제로 빨간불이 되는지 확인했다.
+Vitest + Testing Library + MSW로 31건 — 화면 일곱 중 여섯을 덮는다(원장 화면은 읽기 전용이라 뺐다). 각 테스트는 자기가 잡겠다는 버그를 되살려 실제로 빨간불이 되는지 확인했다.
 
 ```bash
 cd frontend && npm run test
@@ -166,7 +166,7 @@ Java 21 · Spring Boot 4.1.1 · PostgreSQL 16 · Gradle 9.7.1 · Spring AI 1.1.0
 Docker가 필요하다 (Testcontainers).
 
 ```bash
-./gradlew test          # Java 278건 + 프론트 16건
+./gradlew test          # Java 278건 + 프론트 31건
 bash db/run.sh          # 스키마 하네스 191건
 ./gradlew :web:bootRun  # http://localhost:8080
 ```
@@ -191,4 +191,4 @@ bash db/run.sh          # 스키마 하네스 191건
 
 **금액도 범위 밖이다.** 이 코어는 수량과 위치만 책임진다. 원가 계산과 재고자산 평가는 `StockPosted` 이벤트와 원장 id를 받아 ERP가 한다.
 
-명시적으로 미뤄둔 것: `RESOLVE_COUNT`·`TRANSFER` 제안 타입(`MOVE`·`ADJUSTMENT`로 사슬이 이미 증명된다), 발주 데이터 기반 근거(`po_line`), 쓰기 경로 화면 넷(입고·출고·실사·이슈)의 프론트 테스트.
+명시적으로 미뤄둔 것: `RESOLVE_COUNT`·`TRANSFER` 제안 타입(`MOVE`·`ADJUSTMENT`로 사슬이 이미 증명된다), 발주 데이터 기반 근거(`po_line`).

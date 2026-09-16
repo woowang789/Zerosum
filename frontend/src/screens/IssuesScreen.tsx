@@ -97,7 +97,7 @@ const DETAIL_KEY_LABEL: Record<string, string> = {
 }
 
 export function IssuesScreen() {
-  const { data: me } = useMe()
+  const { data: me, isError: meFailed } = useMe()
   const isOperatorOrAbove = me?.roles.some((r) => r === 'OPERATOR' || r === 'SUPERVISOR') ?? false
   const isSupervisor = me?.roles.includes('SUPERVISOR') ?? false
   const [warehouse, setWarehouse] = useState<string | null>(null)
@@ -114,6 +114,36 @@ export function IssuesScreen() {
     queryFn: () => apiGet<OpenIssueRow[]>(`/api/issues?warehouse=${encodeURIComponent(warehouse ?? '')}`),
     enabled: warehouse != null,
   })
+
+  // 재고 화면과 같은 이유로 게이트한다. 목록 쿼리가 enabled: warehouse != null이라 창고가 정해지기
+  // 전에는 시작되지 않고 isLoading도 false다 — 게이트 없이 본문을 그리면 /api/me가 실패했거나 창고
+  // 권한이 없는 사용자에게 빈 드롭다운만 있는 화면이 되고, 권한 문제인지 이슈가 없는 것인지 화면만
+  // 보고는 구분할 수 없다.
+  if (!me) {
+    return (
+      <div className="screen">
+        <header className="screen-header">
+          <h1>정합 이슈</h1>
+        </header>
+        {meFailed ? (
+          <p className="state-message state-error">사용자 정보를 불러오지 못했다. 새로고침해 달라.</p>
+        ) : (
+          <p className="state-message">불러오는 중…</p>
+        )}
+      </div>
+    )
+  }
+
+  if (me.warehouses.length === 0) {
+    return (
+      <div className="screen">
+        <header className="screen-header">
+          <h1>정합 이슈</h1>
+        </header>
+        <p className="state-message">접근할 수 있는 창고가 없다. 관리자에게 권한을 요청해 달라.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="screen">
