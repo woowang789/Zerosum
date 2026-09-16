@@ -301,3 +301,55 @@ it('정정 승인은 그 세션으로 나가고 결과가 화면에 반영된다
   expect(resolvedSessions).toEqual([String(SESSION_ID)])
   expect(screen.queryByRole('button', { name: '정정 승인' })).not.toBeInTheDocument()
 })
+
+/**
+ * 실사 입력 줄은 이 세션의 로케이션 재고만으로 만들어진다.
+ *
+ * <p>{@code GET /api/stock}에는 로케이션 필터가 없어(SKU만 있다) 화면이 창고 전체를 받아 세션 로케이션으로
+ * 거른다. 그 필터가 무너지면 <b>다른 로케이션의 재고가 이 세션의 실사 대상이 된다</b> — 제출 본문은
+ * {@code (skuCode, lotNo, countedQty)}뿐이고 로케이션은 서버가 세션에서 가져오므로, 옆칸 재고를 이 칸에서
+ * 센 것으로 굳혀 버린다. 그 차이는 정정 거래로 원장에 남는다.
+ *
+ * <p>기존 테스트들은 이 필터를 반증할 수 없다 — fakeApi의 stockHandler가 한 로케이션 한 줄만 주므로
+ * 필터를 통째로 지워도 결과가 같다. 그래서 여기서만 로케이션 둘짜리 재고를 세운다.
+ */
+it('실사 줄은 이 세션의 로케이션 재고만으로 만들어진다', async () => {
+  const SESSION_ID = 1
+  const submitBodies: SubmitBody[] = []
+
+  server.use(
+    meHandler,
+    // 같은 창고의 다른 로케이션(ICN01-B-02)에 다른 SKU가 있다 — 이 세션과는 무관한 재고다.
+    http.get('*/api/stock', ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      return HttpResponse.json([
+        {
+          warehouseCode: WAREHOUSE, skuCode: 'SKU-200002', skuName: '우유 1L', lotNo: 'L20260910-B',
+          expiryDate: '2026-09-30', locationCode: LOCATION, locationType: 'STORAGE',
+          onHandQty: SYSTEM_QTY, allocatedQty: 0, availableQty: SYSTEM_QTY, inCount: false,
+        },
+        {
+          warehouseCode: WAREHOUSE, skuCode: 'SKU-999999', skuName: '옆칸 물건', lotNo: 'L-OTHER',
+          expiryDate: null, locationCode: 'ICN01-B-02', locationType: 'STORAGE',
+          onHandQty: 7, allocatedQty: 0, availableQty: 7, inCount: false,
+        },
+      ])
+    }),
+    startHandler([SESSION_ID], []),
+    submitHandler(SESSION_ID, { resolutionTxnId: 1 }, submitBodies),
+  )
+
+  const user = await renderCountScreen()
+  await startSession(user)
+
+  // 옆칸 SKU는 입력 줄로 그려지지도 않는다.
+  expect(await screen.findByText('SKU-200002')).toBeInTheDocument()
+  expect(screen.queryByText('SKU-999999')).not.toBeInTheDocument()
+
+  await submitCount(user, SYSTEM_QTY)
+
+  // 제출 본문에도 이 로케이션 줄만 실린다 — 본문에는 로케이션이 없어 서버가 걸러줄 수 없다.
+  expect(submitBodies).toEqual([
+    { lines: [{ skuCode: 'SKU-200002', lotNo: 'L20260910-B', countedQty: SYSTEM_QTY }] },
+  ])
+})
