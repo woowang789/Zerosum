@@ -141,6 +141,33 @@ public class IssueRepository {
                 .list();
     }
 
+    /**
+     * 종결 근거로 넘어온 거래가 이 창고를 실제로 건드렸는가. 이슈 종결의 {@code resolvedTxnId}는 요청
+     * 본문에서 오는 검증되지 않은 입력이라 컨트롤러가 이것으로 먼저 거른다.
+     *
+     * <p>거래 자체에는 창고가 없다({@code inventory_txn}에 warehouse 컬럼이 없다) — 거래가 어느 창고를
+     * 건드렸는지는 원장 줄에만 있으므로 {@code inventory_ledger_entry.warehouse_id}로 판정한다. 한 거래가
+     * 여러 창고에 줄을 가질 수 있으므로 EXISTS다("이 창고 줄이 하나라도 있는가").
+     *
+     * <p>존재하지 않는 거래 id도 여기서 false가 된다. 그것까지 여기서 잡는 이유는 통과시키면 종결 UPDATE가
+     * {@code resolved_txn_id} 외래키(V1:216)를 위반해 DataIntegrityViolationException이 되고, 두 예외
+     * 어드바이스 어디에도 그 핸들러가 없어 500이 나가기 때문이다.
+     */
+    public boolean txnTouchesWarehouse(long txnId, String warehouseCode) {
+        return Boolean.TRUE.equals(jdbc.sql("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM inventory_ledger_entry e
+                    JOIN warehouse w ON w.id = e.warehouse_id
+                    WHERE e.txn_id = :txnId AND w.code = :warehouseCode
+                )
+                """)
+                .param("txnId", txnId)
+                .param("warehouseCode", warehouseCode)
+                .query(Boolean.class)
+                .single());
+    }
+
     private static OpenIssueRow mapOpenIssueRow(ResultSet rs, int rowNum) throws SQLException {
         return new OpenIssueRow(rs.getLong("issue_id"), rs.getString("issue_type"), rs.getString("severity"),
                 rs.getString("status"), (Long) rs.getObject("location_id"), rs.getString("location_code"),

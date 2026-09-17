@@ -168,10 +168,16 @@ public class ProposalRepository {
      * 읽지만 basis_snapshot을 관측값으로 바꾸는 파싱 자체는 같다.
      */
     private BasisObservations parseBasisObservations(String basisSnapshotJson) {
+        // 식별자나 수량이 빠진 항목은 관측이 아니다 — 버린다. NULL을 그대로 읽으면 rs.getLong·getInt가
+        // 0으로 접어 WarehouseSkuObservation(0, 0, 0) 같은 "아무것도 가리키지 않는 관측"이 만들어지고,
+        // 그것이 현재값 0과 0 대 0으로 대조에 통과한다. ai_proposer는 action_proposal에 테이블 단위
+        // INSERT 권한이 있으므로(V2:47) {"scope":"warehouse_sku"} 한 줄만 넣어 재검증 전체를 무력화할 수
+        // 있었다. 여기서 버리면 그런 제안은 관측 0건이 되어 승인 시점 ③-2에 걸린다.
         List<BalanceObservation> balance = jdbc.sql("""
                 SELECT (o ->> 'balance_id')::BIGINT AS balance_id, (o ->> 'available_qty')::INT AS available_qty
                 FROM jsonb_array_elements(CAST(:basis AS JSONB) -> 'observations') o
                 WHERE o ->> 'scope' = 'balance'
+                  AND o ->> 'balance_id' IS NOT NULL AND o ->> 'available_qty' IS NOT NULL
                 """)
                 .param("basis", basisSnapshotJson)
                 .query((rs, rowNum) -> new BalanceObservation(rs.getLong("balance_id"),
@@ -183,6 +189,8 @@ public class ProposalRepository {
                        (o ->> 'sellable_qty')::INT AS sellable_qty
                 FROM jsonb_array_elements(CAST(:basis AS JSONB) -> 'observations') o
                 WHERE o ->> 'scope' = 'warehouse_sku'
+                  AND o ->> 'warehouse_id' IS NOT NULL AND o ->> 'sku_id' IS NOT NULL
+                  AND o ->> 'sellable_qty' IS NOT NULL
                 """)
                 .param("basis", basisSnapshotJson)
                 .query((rs, rowNum) -> new WarehouseSkuObservation(rs.getLong("warehouse_id"),

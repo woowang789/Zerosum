@@ -311,7 +311,11 @@ function ShipmentPanel({
   onConsumed: (keys: string[]) => void
 }) {
   const [warehouseCode, setWarehouseCode] = useState(warehouses[0] ?? '')
-  const [shipmentSeq, setShipmentSeq] = useState('1')
+  // 입고 화면과 같은 이유로 차수를 미리 채우지 않는다. 멱등 키가 shipment:{주문 줄}:{차수}인데
+  // 주문 줄은 고른 예약에서 파생되므로 사람이 정하는 값은 차수 하나뿐이다. 그것이 '1'로 채워져 있으면
+  // 같은 주문 줄의 2차 출고에서 작업자가 고른 적 없는 1이 다시 나간다 — 소진 대상이 달라 해시가 어긋나
+  // 409 IDEM_CONFLICT로 막히지만, 작업자는 왜 막혔는지도 무엇을 고쳐야 하는지도 알 수 없다.
+  const [shipmentSeq, setShipmentSeq] = useState('')
   const [selectedAllocKeys, setSelectedAllocKeys] = useState<Set<string>>(new Set())
   const [lastResult, setLastResult] = useState<PostingResultResponse | null>(null)
 
@@ -372,6 +376,8 @@ function ShipmentPanel({
       onConsumed(sending.map((a) => a.key))
       // 선택만 비우면 주문번호도 따라 비워진다 — 고른 예약에서 끌어오기 때문이다.
       setSelectedAllocKeys(new Set())
+      // 차수는 따라 비워지지 않으므로 여기서 직접 비운다. 남겨두면 다음 출고가 같은 차수로 나간다.
+      setShipmentSeq('')
     },
   })
 
@@ -389,7 +395,13 @@ function ShipmentPanel({
     customerTotals.set(key, (customerTotals.get(key) ?? 0) + l.qtyNum)
   }
   const idemKey = `shipment:${orderLineRef || '?'}:${shipmentSeq || '?'}`
-  const canSubmit = selectedOrderLineRefs.length === 1 && parsedLines.length > 0 && consumeAllocationIds.length > 0
+  // 차수를 제출 조건에 넣는다. 입고 화면과 달리 여기에는 이 조건이 없어서, 차수를 비워 두면
+  // Number('')가 0이 되어 shipment:{주문 줄}:0 이라는 아무도 고르지 않은 키가 그대로 나갔다.
+  const canSubmit =
+    selectedOrderLineRefs.length === 1 &&
+    parsedLines.length > 0 &&
+    consumeAllocationIds.length > 0 &&
+    shipmentSeq.trim() !== ''
 
   return (
     <div className="detail-section">
@@ -517,7 +529,8 @@ function ShipmentPanel({
             </div>
             <p className="idem-note">
               멱등 키: <span className="mono">{idemKey}</span> — 같은 주문·출고차수로 다시 보내도 새 거래가
-              생기지 않는다.
+              생기지 않는다. <strong>이 요청이 갔는지 확신이 없을 때 다시 보내는 것은 안전하다.</strong>{' '}
+              다만 같은 주문 줄을 한 번 더 내보내는 것이라면 그건 재시도가 아니다 — 차수를 올려야 한다.
             </p>
           </div>
         )}

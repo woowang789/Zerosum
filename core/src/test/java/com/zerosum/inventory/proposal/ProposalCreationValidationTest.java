@@ -92,6 +92,43 @@ class ProposalCreationValidationTest extends AbstractIntegrationTest {
         assertReconciliationClean();
     }
 
+    /**
+     * basisRefs가 빈 제안은 entries가 빈 제안과 같은 이유로 생성 단계에서 거부해야 한다.
+     *
+     * <p>basisRefs가 비면 basis_snapshot의 observations가 비고, 승인 시점 재검증
+     * (BasisRecheck의 warehouseSkuObservationsHold·balanceObservationsHold)은 둘 다 관측 목록을
+     * 순회하는 모양이라 목록이 비면 <b>한 바퀴도 돌지 않고 통과한다</b>. 즉 아무것도 대조하지 않은 채
+     * 재고가 정정된다 — 근거를 요구하는 제안 흐름에서 근거만 빼면 검증이 사라지는 셈이다.
+     *
+     * <p>뒤쪽 절반이 없으면 앞의 거부 단언은 공허하다 — payload가 어딘가 잘못돼 거부됐어도 똑같이
+     * 통과한다. 같은 payload에 근거 하나만 붙인 제안이 만들어지는 것까지 봐야 "basisRefs 때문에
+     * 거부했다"가 되고, 그 제안의 basis_snapshot에 실제로 대조할 관측이 들어 있는 것까지 봐야
+     * "근거가 있다"가 승인 시점에 의미를 갖는다.
+     */
+    @Test
+    void proposalWithoutBasisRefsIsRejected() {
+        receiveColdBrew(100);
+
+        CreateProposalRequest noBasis = new CreateProposalRequest("MOVE", MOVE_PAYLOAD_ICN01, "테스트 사유",
+                "agent:test", null, List.of());
+
+        assertThatThrownBy(() -> proposalCreationService.create(noBasis, "ICN01"))
+                .as("basisRefs가 빈 제안은 승인 시점에 대조할 근거가 없다")
+                .isInstanceOf(ProposalException.class)
+                .extracting(ex -> ((ProposalException) ex).code())
+                .isEqualTo("BASIS_REQUIRED");
+        assertThat(proposalCount()).as("거부됐으므로 제안이 생기지 않는다").isZero();
+
+        assertThat(proposalCreationService.create(requestOfType("MOVE", MOVE_PAYLOAD_ICN01), "ICN01"))
+                .as("근거 하나만 붙인 같은 제안은 만들어진다 — 위 거부는 basisRefs 때문이다")
+                .isInstanceOf(ProposalCreated.class);
+        assertThat(proposalCount()).isOne();
+        assertThat(observationCount())
+                .as("만들어진 제안의 basis_snapshot에는 승인 시점에 대조할 관측이 실제로 들어 있다")
+                .isOne();
+        assertReconciliationClean();
+    }
+
     /** ICN01용 MCP 서버 권한으로 YIT01 entries가 든 제안을 만들려 하면 거부해야 한다 — 쓰기 표면의 창고 누수. */
     @Test
     void proposalTouchingAnotherWarehouseIsRejected() {
@@ -196,5 +233,12 @@ class ProposalCreationValidationTest extends AbstractIntegrationTest {
 
     private int proposalCount() {
         return jdbcClient.sql("SELECT count(*) FROM action_proposal").query(Integer.class).single();
+    }
+
+    /** 유일한 제안의 basis_snapshot에 든 관측 개수 — basisRefs를 받았다는 것과 대조할 값이 있다는 것은 다르다. */
+    private int observationCount() {
+        return jdbcClient.sql("SELECT jsonb_array_length(basis_snapshot -> 'observations') FROM action_proposal")
+                .query(Integer.class)
+                .single();
     }
 }

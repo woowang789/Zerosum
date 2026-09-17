@@ -91,10 +91,18 @@ public class CountResultRepository {
     public void resolveVarianceIssues(long sessionId, long resolutionTxnId, String resolvedBy) {
         // count_session_id 컬럼으로 직접 찾는다 — 예전에는 detail->>'countSessionId' JSONB 문자열
         // 비교로 다시 찾아야 했다 (V3__issue_columns_and_indexes.sql로 이 컬럼과 외래키가 생겼다).
+        //
+        // 상태는 ReconciliationRepository#updateResolved와 같은 IN ('OPEN','ACKED')을 쓴다. 'OPEN'만
+        // 보던 동안에는 담당자가 "확인함"을 누른 COUNT_VARIANCE가 실사 종결에서 빠져, 차이를 실제로
+        // 정정하고 세션을 닫았는데도 이슈만 ACKED로 남았다. 되살아날 경로는 없고(COUNT_VARIANCE는 실사
+        // 제출 때 한 번만 생성된다) 닫으려면 사람이 이슈 화면에서 따로 종결해야 했다 — 이미 고친 차이를
+        // 다시 종결하는, 감사 기록만 어지럽히는 일이다. 거울 구현인 db/04-harness.sql tst_count_resolve도
+        // 같이 고쳤다.
         jdbc.sql("""
                 UPDATE inventory_issue
                 SET status = 'RESOLVED', resolved_txn_id = :txnId, resolved_by = :resolvedBy, resolved_at = now()
-                WHERE issue_type = 'COUNT_VARIANCE' AND count_session_id = :sessionId AND status = 'OPEN'
+                WHERE issue_type = 'COUNT_VARIANCE' AND count_session_id = :sessionId
+                  AND status IN ('OPEN', 'ACKED')
                 """)
                 .param("txnId", resolutionTxnId)
                 .param("resolvedBy", resolvedBy)

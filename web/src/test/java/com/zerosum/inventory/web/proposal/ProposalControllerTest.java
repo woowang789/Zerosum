@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.zerosum.inventory.domain.BasisRef;
 import com.zerosum.inventory.domain.Posted;
 import com.zerosum.inventory.domain.PostingOutcome;
 import com.zerosum.inventory.posting.PostingGateway;
@@ -128,8 +129,12 @@ class ProposalControllerTest extends AbstractWebTest {
     // ── 픽스처 헬퍼 ──────────────────────────────────────────────────────────────
 
     private long createProposal(String payloadJson, String allowedWarehouseCode) {
+        // 근거 좌표는 movePayload의 출발 줄과 같은 곳을 짚는다. 근거 없는 제안은 만들어지지 않고
+        // (ProposalCreationService BASIS_REQUIRED), 근거가 있어도 가리키는 잔액 행이 없으면 승인이
+        // STALE이 된다(ProposalApprovalService ③-2) — 실제로 승인까지 가는 테스트
+        // (approverComesFromAuthenticationNotBody)가 receiveColdBrew로 이 행을 먼저 만든다.
         CreateProposalRequest request = new CreateProposalRequest("MOVE", payloadJson, "테스트 사유", "agent:test", null,
-                List.of());
+                List.of(BasisRef.balance(allowedWarehouseCode, "A-01-01-2", "SKU-200002", "L20260910-B")));
         CreateProposalOutcome outcome = proposalCreationService.create(request, allowedWarehouseCode);
         return ((ProposalCreated) outcome).proposalId();
     }

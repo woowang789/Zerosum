@@ -31,6 +31,13 @@ public class ProposalBasisReviewService {
 
         /** ProposalApprovalService가 실행 여부를 가르는 것과 같은 기준: 스코프 전부가 허용 오차 안이어야 한다. */
         public boolean allValid() {
+            // 관측이 하나도 없으면 "전부 유효"가 아니라 "대조할 것이 없다"다. allMatch는 빈 목록에 참이라
+            // 이 줄이 없으면 화면은 "근거 유효"라고 하는데 승인하면 STALE이 된다
+            // (ProposalApprovalService ③-2). 두 판정은 같은 기준이어야 한다 — 이 클래스와 BasisRecheck의
+            // javadoc이 그것을 명시적으로 요구한다.
+            if (balance.isEmpty() && warehouseSku.isEmpty()) {
+                return false;
+            }
             return balance.stream().allMatch(r -> r.comparison().valid())
                     && warehouseSku.stream().allMatch(r -> r.comparison().valid());
         }

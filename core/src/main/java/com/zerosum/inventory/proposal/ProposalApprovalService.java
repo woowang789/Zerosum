@@ -57,6 +57,19 @@ public class ProposalApprovalService {
             return new ProposalExpired(proposal.id());
         }
 
+        // ③-2 근거가 하나도 없으면 재검증할 것이 없다. ④와 ⑥의 대조는 둘 다 관측 목록을 순회하므로
+        // 목록이 비면 한 바퀴도 돌지 않고 통과한다 — 근거를 하나도 대조하지 않은 채 재고가 정정된다.
+        // 생성 단계가 BASIS_REQUIRED로 막지만 그것만으로는 경계가 아니다: 이미 PENDING인 제안은 그 검사를
+        // 지나온 적이 없고, ai_proposer는 action_proposal에 테이블 단위 INSERT 권한이 있어 MCP를 거치지
+        // 않고 직접 넣을 수도 있다. ⑦의 이슈 창고 대조를 승인 시점에 다시 보는 것과 같은 이유다.
+        //
+        // 예외가 아니라 STALE이다 — "근거가 지금 값과 맞지 않는다"와 "근거가 없다"는 승인하는 사람에게
+        // 같은 답이다: 이 제안으로는 지금 실행할 수 없으니 다시 만들어라.
+        if (proposal.warehouseSkuObservations().isEmpty() && proposal.balanceObservations().isEmpty()) {
+            proposalRepo.markStale(proposal.id(), approver);
+            return new Stale(proposal.id());
+        }
+
         BasisRecheck recheck = new BasisRecheck(tolerancePct);
 
         // ④ 잠글 수 없는 관측값(warehouse_sku 스코프)을 포스팅 전에 비교한다 — 잔액 행을 잠근 뒤 집계 뷰를

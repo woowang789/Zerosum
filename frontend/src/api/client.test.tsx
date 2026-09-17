@@ -91,6 +91,8 @@ it('POST 요청에서도 401이면 로그인 화면으로 돌아가고 자격 �
   await user.click(await screen.findByRole('link', { name: '입고' }))
 
   await user.type(await screen.findByLabelText('발주 줄(poLineRef)'), 'PO-1')
+  // 차수는 화면이 채워 주지 않는다 — 비워 두면 제출 버튼이 죽어 있어 요청 자체가 나가지 않는다.
+  await user.type(screen.getByLabelText('입고 차수(receiptSeq)'), '1')
   await user.type(screen.getByLabelText('로케이션 (물리)'), 'RCV-01')
   await user.type(screen.getByLabelText('SKU'), 'SKU-1')
   await user.type(screen.getByLabelText('로트'), 'L1')
@@ -171,6 +173,7 @@ it('쓰기 요청은 Content-Type: application/json을 달고 나간다', async 
   await user.click(await screen.findByRole('link', { name: '입고' }))
 
   await user.type(await screen.findByLabelText('발주 줄(poLineRef)'), 'PO-CT')
+  await user.type(screen.getByLabelText('입고 차수(receiptSeq)'), '1')
   await user.type(screen.getByLabelText('로케이션 (물리)'), 'RCV-01')
   await user.type(screen.getByLabelText('SKU'), 'SKU-1')
   await user.type(screen.getByLabelText('로트'), 'L1')

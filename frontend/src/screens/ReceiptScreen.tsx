@@ -38,7 +38,10 @@ export function ReceiptScreen() {
 function ReceiptForm({ warehouses }: { warehouses: string[] }) {
   const [warehouseCode, setWarehouseCode] = useState(warehouses[0] ?? '')
   const [poLineRef, setPoLineRef] = useState('')
-  const [receiptSeq, setReceiptSeq] = useState('1')
+  // 차수는 절대 미리 채우지 않는다. 멱등 키가 receipt:{발주 줄}:{차수}라서, 화면이 차수를 1로 채워 두면
+  // 같은 발주 줄의 두 번째 파렛트를 등록할 때 작업자가 고른 적 없는 1이 그대로 다시 나가고 서버는 그것을
+  // 재시도로 보아 첫 거래를 돌려준다 — 원장에 아무것도 남지 않는데 화면은 "기록됐다"를 띄운다.
+  const [receiptSeq, setReceiptSeq] = useState('')
   const [locationCode, setLocationCode] = useState('')
   const [skuCode, setSkuCode] = useState('')
   const [lotNo, setLotNo] = useState('')
@@ -60,7 +63,7 @@ function ReceiptForm({ warehouses }: { warehouses: string[] }) {
       setLastResult(result)
       // 성공하면 폼을 비운다 — 창고 선택만 남긴다(같은 창고에 연달아 입고를 등록하는 경우가 흔하다).
       setPoLineRef('')
-      setReceiptSeq('1')
+      setReceiptSeq('')
       setLocationCode('')
       setSkuCode('')
       setLotNo('')
@@ -167,7 +170,9 @@ function ReceiptForm({ warehouses }: { warehouses: string[] }) {
           </div>
           <p className="idem-note">
             멱등 키: <span className="mono">{idemKey}</span> — 같은 발주 줄·차수로 다시 등록해도 새 거래가
-            생기지 않고 처음 거래가 그대로 돌아온다. 그래서 같은 요청을 두 번 보내도 안전하다.
+            생기지 않고 처음 거래가 그대로 돌아온다. <strong>이 요청이 갔는지 확신이 없을 때 다시 보내는 것은
+            안전하다.</strong> 다만 같은 발주 줄로 물건이 한 번 더 들어온 것이라면 그건 재시도가 아니다 —
+            차수를 올려야 한다. 차수를 그대로 두면 재고는 늘지 않고 처음 거래만 다시 돌아온다.
           </p>
         </div>
 

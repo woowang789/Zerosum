@@ -245,8 +245,12 @@ function ProposalDetailPanel({
   }
 
   const { proposal, basisReview } = detailQuery.data
+  // 관측이 하나도 없으면 "전부 유효"가 아니다 — every는 빈 배열에 참이다. 서버의
+  // BasisReview.allValid()와 같은 기준이어야 한다: 대조할 것이 없는 제안은 승인해도 STALE이 된다.
   const allValid =
-    basisReview.balance.every((r) => r.comparison.valid) && basisReview.warehouseSku.every((r) => r.comparison.valid)
+    (basisReview.balance.length > 0 || basisReview.warehouseSku.length > 0) &&
+    basisReview.balance.every((r) => r.comparison.valid) &&
+    basisReview.warehouseSku.every((r) => r.comparison.valid)
   const isPending = proposal.status === 'PENDING'
   const isExpired = new Date(proposal.expiresAt).getTime() <= Date.now()
 

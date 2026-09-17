@@ -68,7 +68,9 @@ class ProposalApprovalTest extends AbstractIntegrationTest {
 
     @Test
     void expiredProposalBecomesExpiredWithoutPosting() {
-        long id = createProposal("MOVE", MOVE_PAYLOAD, List.of());
+        // 근거를 붙여 만든다 — 이 테스트가 보는 것은 만료이지 근거가 아니다. 근거 없는 제안은 애초에
+        // 만들어지지 않으므로(ProposalCreationService BASIS_REQUIRED) 다른 테스트와 같은 좌표를 쓴다.
+        long id = createMoveProposal(MOVE_PAYLOAD);
         expireProposal(id);
 
         ApprovalOutcome outcome = proposalGateway.approve(id, "user:choi.dw");

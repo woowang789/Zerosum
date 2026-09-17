@@ -197,9 +197,15 @@ public abstract class AbstractIntegrationTest {
                 .single();
     }
 
+    /**
+     * 아직 닫히지 않은 COUNT_VARIANCE. 'OPEN'만 세면 담당자가 인지한(ACKED) 이슈가 종결에서 빠져도
+     * 0이 나와 통과한다 — 실제로 있었던 결함이라(CountResultRepository#resolveVarianceIssues)
+     * "RESOLVED가 아닌 것"으로 센다.
+     */
     protected int openCountVarianceIssueCount() {
         return jdbcClient
-                .sql("SELECT count(*) FROM inventory_issue WHERE issue_type = 'COUNT_VARIANCE' AND status = 'OPEN'")
+                .sql("SELECT count(*) FROM inventory_issue WHERE issue_type = 'COUNT_VARIANCE'"
+                        + " AND status <> 'RESOLVED'")
                 .query(Integer.class)
                 .single();
     }
