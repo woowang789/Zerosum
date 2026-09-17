@@ -141,6 +141,8 @@ async function confirmShipment(user: UserEvent, orderLineRef: string, allocation
   }
   // 주문번호는 입력하지 않는다 — 고른 예약에서 끌어온다. 끌어온 값이 기대와 같은지 여기서 확인한다.
   expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue(orderLineRef)
+  // 차수는 화면이 채워주지 않는다 — 작업자가 매번 고른다(멱등 키의 절반이다).
+  await user.type(within(panel).getByLabelText('출고 차수(shipmentSeq)'), '1')
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
 }
 
@@ -382,6 +384,7 @@ it('고른 뒤 해제한 할당은 출고 본문에 실리지 않는다', async 
   expect(releaseBodies).toEqual([{ allocationIds: [11] }])
 
   expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue('SO-2002')
+  await user.type(within(panel).getByLabelText('출고 차수(shipmentSeq)'), '1')
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
 
   expect(await screen.findByText('출고가 확정됐다 — 거래 #777')).toBeInTheDocument()
@@ -508,6 +511,68 @@ it('출고 차수와 allowInCount가 입력한 대로 나간다', async () => {
 })
 
 /**
+ * 출고 차수는 화면이 대신 고르지 않는다.
+ *
+ * <p>멱등 키가 `shipment:{orderLineRef}:{shipmentSeq}`이고 주문 줄은 고른 예약에서 파생되므로, 사람이
+ * 정하는 값은 차수 하나다. 그 칸이 '1'로 미리 채워져 있으면 같은 주문 줄의 2차 출고에서 작업자가 고른 적
+ * 없는 1이 다시 나간다 — 소진 대상이 달라 해시가 어긋나 409로 막히지만, 작업자는 왜 막혔는지도 무엇을
+ * 고쳐야 하는지도 알 수 없다. 입고 화면에서 고친 것과 같은 형태다(ReceiptScreen.test.tsx).
+ */
+it('출고 차수는 처음부터 비어 있고, 출고에 성공한 뒤에도 비어 있다', async () => {
+  const shipmentBodies: ShipmentBody[] = []
+
+  server.use(
+    meHandler,
+    allocateHandler(
+      {
+        'SO-7001': {
+          allocationIds: [71],
+          lines: [
+            { allocationId: 71, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 2 },
+          ],
+        },
+        'SO-7002': {
+          allocationIds: [72],
+          lines: [
+            { allocationId: 72, locationCode: 'ICN01-A-01', skuCode: 'SKU-200002', lotNo: 'L20260910-B', qty: 3 },
+          ],
+        },
+      },
+      [],
+    ),
+    http.post('*/api/shipments', async ({ request }) => {
+      if (!authenticate(request)) return unauthorized()
+      shipmentBodies.push((await request.json()) as ShipmentBody)
+      return HttpResponse.json({ txnId: 701 })
+    }),
+  )
+
+  const user = await renderShipmentScreen()
+  await allocate(user, 'SO-7001', 'SKU-200002', 2)
+
+  const panel = section('2단계 — 출고 확정')
+  const seq = within(panel).getByLabelText('출고 차수(shipmentSeq)')
+
+  // 처음부터 비어 있다 — 예약을 골라도 차수를 적기 전에는 출고할 수 없다.
+  expect(seq).toHaveValue(null)
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 71$/ }))
+  expect(within(panel).getByLabelText('주문번호(orderLineRef)')).toHaveValue('SO-7001')
+  expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
+
+  await user.type(seq, '1')
+  await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
+  expect(await screen.findByText('출고가 확정됐다 — 거래 #701')).toBeInTheDocument()
+  expect(shipmentBodies[0].shipmentSeq).toBe(1)
+
+  // 성공 뒤에도 비어 있다. 다음 출고가 앞 차수를 물려받지 않는다.
+  expect(within(panel).getByLabelText('출고 차수(shipmentSeq)')).toHaveValue(null)
+
+  await allocate(user, 'SO-7002', 'SKU-200002', 3)
+  await user.click(within(panel).getByRole('checkbox', { name: /ID 72$/ }))
+  expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
+})
+
+/**
  * 서버가 출고를 거절하면 그 이유가 화면에 뜬다.
  *
  * <p>쓰기 화면의 절반은 거절당하는 경로다. 재고가 모자라거나(INSUFFICIENT_STOCK) 할당과 물리 줄이
@@ -589,6 +654,10 @@ it('주문번호는 고른 예약에서 끌어오고, 두 주문에 걸치면 �
   const panel = section('2단계 — 출고 확정')
   const field = within(panel).getByLabelText('주문번호(orderLineRef)')
 
+  // 차수를 먼저 적어 둔다 — 이 테스트가 보는 것은 주문 줄 조건이지 차수가 아니다. 차수가 비어 있으면
+  // 그것만으로도 버튼이 막혀 아래 enabled 단언이 무엇 때문에 성립하는지 알 수 없게 된다.
+  await user.type(within(panel).getByLabelText('출고 차수(shipmentSeq)'), '1')
+
   // 아무것도 고르지 않았으면 비어 있고 출고할 수 없다.
   expect(field).toHaveValue('')
   expect(within(panel).getByRole('button', { name: '출고 확정' })).toBeDisabled()
@@ -663,6 +732,7 @@ it('해제한 할당은 출고 성공 뒤에도 해제됨으로 남는다', asyn
   await user.click(within(releasedRow).getByRole('button', { name: '할당 해제' }))
   expect(await within(releasedRow).findByText('해제됨')).toBeInTheDocument()
 
+  await user.type(within(panel).getByLabelText('출고 차수(shipmentSeq)'), '1')
   await user.click(within(panel).getByRole('button', { name: '출고 확정' }))
   expect(await screen.findByText('출고가 확정됐다 — 거래 #888')).toBeInTheDocument()
 

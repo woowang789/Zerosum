@@ -73,6 +73,14 @@ public class ProposalCreationService {
             throw new ProposalException("ENTRIES_REQUIRED",
                     "entries가 비어 있는 제안은 승인해도 만들 거래가 없다");
         }
+        // entries와 짝이다. entries가 비면 만들 거래가 없고, basisRefs가 비면 승인 시점에 대조할 근거가
+        // 없다 — BasisRecheck의 두 대조는 관측 목록을 순회하므로 목록이 비면 한 바퀴도 돌지 않고 통과한다.
+        // 근거 없이 재고를 정정하는 제안이 되는 셈이라 여기서 막는다(승인 쪽에도 같은 검사가 있다 —
+        // ProposalApprovalService, ai_proposer가 MCP를 거치지 않고 직접 INSERT할 수 있기 때문이다).
+        if (request.basisRefs().isEmpty()) {
+            throw new ProposalException("BASIS_REQUIRED",
+                    "basisRefs가 비어 있는 제안은 승인 시점에 대조할 근거가 없다");
+        }
         if ("ADJUSTMENT".equals(request.proposalType()) && payload.reasonCode() == null) {
             throw new ProposalException("REASON_CODE_REQUIRED",
                     "ADJUSTMENT 제안은 payload 최상위에 reasonCode가 있어야 한다 (승인 시점에 inventory_txn CHECK로 막힌다)");

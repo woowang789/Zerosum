@@ -407,7 +407,8 @@ BEGIN
    WHERE id = p_session;
   UPDATE inventory_issue SET status='RESOLVED', resolved_txn_id=v_txn,
          resolved_by=p_user, resolved_at=now()
-   WHERE issue_type='COUNT_VARIANCE' AND detail->>'countSessionId' = p_session::TEXT AND status='OPEN';
+   WHERE issue_type='COUNT_VARIANCE' AND detail->>'countSessionId' = p_session::TEXT
+     AND status IN ('OPEN','ACKED');
   RETURN v_txn;
 END;
 $$;

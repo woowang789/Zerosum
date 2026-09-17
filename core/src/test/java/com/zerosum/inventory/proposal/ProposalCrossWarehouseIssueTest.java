@@ -46,13 +46,25 @@ class ProposalCrossWarehouseIssueTest extends AbstractIntegrationTest {
         assertReconciliationClean();
     }
 
-    /** 생성 검증을 거치지 않고 들어온 제안 — ai_proposer의 테이블 단위 INSERT가 그 경로다. */
+    /**
+     * 생성 검증을 거치지 않고 들어온 제안 — ai_proposer의 테이블 단위 INSERT가 그 경로다.
+     *
+     * <p>basis_snapshot은 AiProposalRepository#insertCanonical이 만드는 것과 같은 모양으로 A-01-01-1의
+     * 현재 잔액을 담는다. 이 테스트가 보는 것은 "재고 정정은 실행되고 남의 창고 이슈만 안 닫힌다"이므로,
+     * 승인이 근거 재검증(ProposalApprovalService ③-2·④·⑥)을 통과해 실제로 포스팅까지 가야 한다.
+     */
     private long insertPendingProposalPointingAt(long issueId) {
         return jdbcClient.sql("""
                 INSERT INTO action_proposal (proposal_type, command_payload, basis_snapshot, rationale,
                                              proposed_by, expires_at)
-                VALUES ('ADJUSTMENT', CAST(:payload AS JSONB), '{"observations": []}'::JSONB,
-                        '남의 창고 이슈를 가리키는 제안', 'agent:probe', now() + INTERVAL '60 minutes')
+                SELECT 'ADJUSTMENT', CAST(:payload AS JSONB),
+                       jsonb_build_object('captured_at', now(), 'observations',
+                         jsonb_build_array(jsonb_build_object('scope', 'balance', 'balance_id', b.balance_id,
+                                                              'available_qty', b.available_qty))),
+                       '남의 창고 이슈를 가리키는 제안', 'agent:probe', now() + INTERVAL '60 minutes'
+                FROM v_balance_basis b
+                WHERE b.warehouse_code = 'ICN01' AND b.location_code = 'A-01-01-1'
+                  AND b.sku_code = 'SKU-200002' AND b.lot_no = 'L20260910-B'
                 RETURNING id
                 """)
                 .param("payload", """

@@ -117,7 +117,100 @@ class ProposalStaleTest extends AbstractIntegrationTest {
         assertReconciliationClean();
     }
 
+    @Test
+    void basisSnapshotWithNoObservations_marksStaleAndMovesNoStock() {
+        receiveColdBrew("A-01-01-2", 100);
+
+        // 생성 단계의 BASIS_REQUIRED를 지나온 적이 없는 제안 — ai_proposer는 action_proposal에 테이블
+        // 단위 INSERT 권한이 있어 MCP(create_proposal)를 거치지 않고 직접 넣을 수 있다(하네스 UC-E12).
+        long id = insertPendingProposalWithoutBasis();
+
+        ApprovalOutcome outcome = proposalGateway.approve(id, "user:choi.dw");
+
+        assertThat(outcome).as("대조할 근거가 하나도 없으면 실행하지 않는다").isEqualTo(new Stale(id));
+        assertThat(proposalStatus(id)).isEqualTo("STALE");
+        // 핵심: BasisRecheck의 두 대조는 관측 목록을 순회하므로, 목록이 비면 한 바퀴도 돌지 않고 통과해
+        // 근거를 하나도 보지 않은 채 재고가 움직인다.
+        assertThat(onHandQty("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B"))
+                .as("출발 로케이션 재고가 그대로다").isEqualTo(100);
+        assertThat(onHandQty("ICN01", "A-01-02-1", "SKU-200002", "L20260910-B"))
+                .as("도착 로케이션으로 한 개도 옮겨지지 않았다").isZero();
+        assertThat(idemKeyTxnCount("proposal:" + id)).as("원장·거래에도 아무것도 쓰이지 않는다").isZero();
+        assertReconciliationClean();
+    }
+
+    @Test
+    void basisSnapshotWithIdentifierlessObservations_marksStaleAndMovesNoStock() {
+        receiveColdBrew("A-01-01-2", 100);
+
+        // 관측 목록이 비어 있지 않지만 항목에 식별자가 없다. NULL을 그대로 읽으면 rs.getLong·getInt가
+        // 0으로 접혀 "아무것도 가리키지 않는 관측"이 만들어지고, 그것이 현재값 0과 0 대 0으로 대조를
+        // 통과한다 — "관측이 하나라도 있으면 진짜 근거다"라고 가정한 ③-2를 그대로 우회하는 길이다.
+        // 대기 중인 같은 payload의 제안은 하나만 허용되므로(uq_proposal_pending) 수량만 다르게 둔다.
+        long noIdWarehouseSku = insertPendingProposal(MOVE_PAYLOAD, """
+                {"observations":[{"scope":"warehouse_sku"}]}""");
+        long noIdBalance = insertPendingProposal(movePayload(15), """
+                {"observations":[{"scope":"balance"}]}""");
+
+        ApprovalOutcome warehouseSkuOutcome = proposalGateway.approve(noIdWarehouseSku, "user:choi.dw");
+        ApprovalOutcome balanceOutcome = proposalGateway.approve(noIdBalance, "user:choi.dw");
+
+        // 핵심: 식별자 없는 관측을 버리지 않으면 warehouse_sku 쪽은 ④를 0 대 0으로 통과해 MOVE가
+        // 실제로 포스팅됐다 — 근거를 하나도 대조하지 않은 채 재고가 움직인 것이다.
+        assertThat(onHandQty("ICN01", "A-01-01-2", "SKU-200002", "L20260910-B"))
+                .as("출발 로케이션 재고가 그대로다").isEqualTo(100);
+        assertThat(onHandQty("ICN01", "A-01-02-1", "SKU-200002", "L20260910-B"))
+                .as("도착 로케이션으로 한 개도 옮겨지지 않았다").isZero();
+
+        assertThat(warehouseSkuOutcome).as("식별자 없는 warehouse_sku 항목은 관측이 아니다")
+                .isEqualTo(new Stale(noIdWarehouseSku));
+        assertThat(balanceOutcome).as("balance_id 없는 항목도 마찬가지다").isEqualTo(new Stale(noIdBalance));
+        assertThat(proposalStatus(noIdWarehouseSku)).isEqualTo("STALE");
+        assertThat(proposalStatus(noIdBalance)).isEqualTo("STALE");
+        assertThat(idemKeyTxnCount("proposal:" + noIdWarehouseSku)).isZero();
+        assertThat(idemKeyTxnCount("proposal:" + noIdBalance)).isZero();
+        // balance 쪽은 ⑥(잔액 행을 잠근 뒤)에서 걸려 STALE이 되기는 했지만 포스팅까지 갔다 —
+        // 이제는 ③-2에서 걸러져 잠금 흔적조차 남지 않는다.
+        assertThat(idempotencyRecordCount("proposal:" + noIdBalance))
+                .as("포스팅 전에 걸러져 idempotency_record에 잠금 흔적조차 없다").isZero();
+        assertReconciliationClean();
+    }
+
     // ── 픽스처 헬퍼 ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 생성 검증을 거치지 않고 들어온, 근거가 비어 있는 PENDING 제안. basis_snapshot의 "비어 있음"은
+     * 하네스 UC-E12가 넣는 값과 같은 {@code {"observations": []}}다 — ProposalRepository의 파싱
+     * SQL이 {@code jsonb_array_elements(basis_snapshot -> 'observations')}로 읽으므로 두 스코프 모두
+     * 빈 목록이 된다.
+     */
+    private long insertPendingProposalWithoutBasis() {
+        return insertPendingProposal(MOVE_PAYLOAD, "{\"observations\": []}");
+    }
+
+    /** 생성 검증(BASIS_REQUIRED)을 거치지 않고 command_payload·basis_snapshot을 있는 그대로 넣은 PENDING 제안. */
+    private long insertPendingProposal(String payloadJson, String basisSnapshotJson) {
+        return jdbcClient.sql("""
+                INSERT INTO action_proposal (proposal_type, command_payload, basis_snapshot, rationale,
+                                             proposed_by, expires_at)
+                VALUES ('MOVE', CAST(:payload AS JSONB), CAST(:basis AS JSONB),
+                        '근거 없이 들어온 제안', 'agent:probe', now() + INTERVAL '60 minutes')
+                RETURNING id
+                """)
+                .param("payload", payloadJson)
+                .param("basis", basisSnapshotJson)
+                .query(Long.class)
+                .single();
+    }
+
+    /** MOVE_PAYLOAD와 같은 이동, 수량만 다르다 — uq_proposal_pending에 걸리지 않게 하려는 것뿐이다. */
+    private static String movePayload(int qty) {
+        return """
+                {"txnType":"MOVE","entries":[
+                   {"wh":"ICN01","loc":"A-01-01-2","sku":"SKU-200002","lot":"L20260910-B","qty":-%d},
+                   {"wh":"ICN01","loc":"A-01-02-1","sku":"SKU-200002","lot":"L20260910-B","qty":%d}]}
+                """.formatted(qty, qty);
+    }
 
     private void receiveColdBrew(String locationCode, int qty) {
         postAndExpectSuccess(request("receipt:STALE-" + locationCode + ":" + qty, "RECEIPT", null, null,

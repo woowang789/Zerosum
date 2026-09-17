@@ -32,10 +32,11 @@ class ProposalReviewTest extends AbstractIntegrationTest {
 
     @Test
     void listPendingReturnsOnlyOwnWarehouseAndUnexpired() {
-        long ownId = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 5), List.of(), "ICN01");
-        createProposal("MOVE", movePayload("YIT01", "A-01-01-2", "A-01-02-1", 6), List.of(), "YIT01");
-        long expiredId = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 7), List.of(),
+        long ownId = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 5), defaultBasis("ICN01"),
                 "ICN01");
+        createProposal("MOVE", movePayload("YIT01", "A-01-01-2", "A-01-02-1", 6), defaultBasis("YIT01"), "YIT01");
+        long expiredId = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 7),
+                defaultBasis("ICN01"), "ICN01");
         expireProposal(expiredId);
 
         List<ProposalRepository.PendingProposalRow> rows = proposalRepository.listPending("ICN01", 10);
@@ -89,8 +90,31 @@ class ProposalReviewTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void emptyBasisIsInvalidOnScreenAndStaleOnApproval() {
+        // 생성 검증(BASIS_REQUIRED)을 지나온 적 없는 제안 — ai_proposer는 action_proposal에 테이블 단위
+        // INSERT 권한이 있어 MCP(create_proposal)를 거치지 않고 직접 넣을 수 있다(하네스 UC-E12).
+        long id = insertPendingProposalWithEmptyBasis();
+
+        ProposalBasisReviewService.BasisReview review = proposalBasisReviewService.review(id);
+
+        assertThat(review.balance()).isEmpty();
+        assertThat(review.warehouseSku()).isEmpty();
+        assertThat(review.allValid())
+                .as("대조할 관측이 하나도 없으면 '전부 유효'가 아니다 — allMatch는 빈 목록에 참이라 공허하게 통과했다")
+                .isFalse();
+
+        // 핵심: 화면 판정과 승인 판정이 갈리지 않는다. 화면이 무효라고 본 제안은 승인해도 STALE이다.
+        ApprovalOutcome outcome = proposalGateway.approve(id, "user:choi.dw");
+
+        assertThat(outcome).as("화면이 무효라고 본 제안은 승인해도 실행되지 않는다").isEqualTo(new Stale(id));
+        assertThat(proposalStatus(id)).isEqualTo("STALE");
+        assertThat(idemKeyTxnCount("proposal:" + id)).isZero();
+        assertReconciliationClean();
+    }
+
+    @Test
     void rejectRecordsWhoAndNote() {
-        long id = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 8), List.of(), "ICN01");
+        long id = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 8), defaultBasis("ICN01"), "ICN01");
 
         proposalGateway.reject(id, "user:ops", "수량이 실측과 다르다");
 
@@ -104,7 +128,7 @@ class ProposalReviewTest extends AbstractIntegrationTest {
 
     @Test
     void rejectedProposalCannotBeApproved() {
-        long id = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 9), List.of(), "ICN01");
+        long id = createProposal("MOVE", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 9), defaultBasis("ICN01"), "ICN01");
         proposalGateway.reject(id, "user:ops", "재작성 요청");
 
         ApprovalOutcome outcome = proposalGateway.approve(id, "user:choi.dw");
@@ -156,12 +180,39 @@ class ProposalReviewTest extends AbstractIntegrationTest {
                 line("ICN01", "V-CUSTOMER", "SKU-200002", "L20260910-B", qty)));
     }
 
+    /**
+     * 근거를 보지 않는 테스트(목록·거부·만료)가 쓰는 최소 근거. 근거 없는 제안은 애초에 만들어지지
+     * 않으므로(ProposalCreationService BASIS_REQUIRED) 픽스처에도 하나는 있어야 한다. 이 좌표가 실제
+     * 잔액 행을 맞히는지는 이 테스트들과 무관하다 — 승인까지 가지 않는다.
+     */
+    private static List<BasisRef> defaultBasis(String warehouseCode) {
+        return List.of(BasisRef.balance(warehouseCode, "A-01-01-2", "SKU-200002", "L20260910-B"));
+    }
+
     private long createProposal(String proposalType, String payloadJson, List<BasisRef> basisRefs,
             String allowedWarehouseCode) {
         CreateProposalRequest request = new CreateProposalRequest(proposalType, payloadJson, "테스트 사유",
                 "agent:test", null, basisRefs);
         CreateProposalOutcome outcome = proposalCreationService.create(request, allowedWarehouseCode);
         return ((ProposalCreated) outcome).proposalId();
+    }
+
+    /**
+     * 생성 검증을 거치지 않고 들어온, 근거가 비어 있는 PENDING 제안(ProposalStaleTest의 같은 픽스처와
+     * 같은 모양). basis_snapshot의 "비어 있음"은 하네스 UC-E12가 넣는 값과 같은
+     * {@code {"observations": []}}다.
+     */
+    private long insertPendingProposalWithEmptyBasis() {
+        return jdbcClient.sql("""
+                INSERT INTO action_proposal (proposal_type, command_payload, basis_snapshot, rationale,
+                                             proposed_by, expires_at)
+                VALUES ('MOVE', CAST(:payload AS JSONB), '{"observations": []}'::JSONB,
+                        '근거 없이 들어온 제안', 'agent:probe', now() + INTERVAL '60 minutes')
+                RETURNING id
+                """)
+                .param("payload", movePayload("ICN01", "A-01-01-2", "A-01-02-1", 20))
+                .query(Long.class)
+                .single();
     }
 
     private void expireProposal(long proposalId) {

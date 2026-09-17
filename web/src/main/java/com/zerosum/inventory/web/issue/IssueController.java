@@ -2,6 +2,7 @@ package com.zerosum.inventory.web.issue;
 
 import com.zerosum.inventory.domain.IssueException;
 import com.zerosum.inventory.reconciliation.ReconciliationService;
+import com.zerosum.inventory.web.error.InvalidRequestException;
 import com.zerosum.inventory.web.security.AccessGuard;
 import com.zerosum.inventory.web.security.WarehouseScope;
 import java.util.List;
@@ -64,6 +65,15 @@ public class IssueController {
         AccessGuard.requireAnyRole(authentication, "SUPERVISOR");
         IssueRepository.OpenIssueRow issue = requireIssue(id);
         AccessGuard.requireWarehouse(authentication, issue.warehouseCode());
+        // 이슈는 위에서 창고를 대조했지만 종결 근거(resolvedTxnId)는 요청 본문에서 오는 검증되지 않은
+        // 값이다. 그대로 넘기면 남의 창고 거래가 이 이슈의 "고친 거래"로 감사 기록에 남고(읽기는 창고로
+        // 막혀 있어 담당자는 그 거래를 열어볼 수도 없다), 없는 id는 외래키 위반이 되어 500이 나간다.
+        if (request.resolvedTxnId() != null
+                && !issueRepo.txnTouchesWarehouse(request.resolvedTxnId(), issue.warehouseCode())) {
+            throw new InvalidRequestException("RESOLVED_TXN_NOT_IN_WAREHOUSE",
+                    "종결 근거 거래(%d)가 이 이슈의 창고(%s)를 건드린 거래가 아니다"
+                            .formatted(request.resolvedTxnId(), issue.warehouseCode()));
+        }
         reconciliationService.resolve(id, authentication.getName(), request.resolvedTxnId(), request.note());
     }
 
